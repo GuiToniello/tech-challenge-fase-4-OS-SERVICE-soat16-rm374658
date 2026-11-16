@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: os-service-api-config
+  namespace: os-service
+  labels:
+    app.kubernetes.io/name: os-service-api
+    app.kubernetes.io/part-of: techchallenge-oficina
+data:
+  ASPNETCORE_ENVIRONMENT: "Production"
+  ASPNETCORE_URLS: "http://+:8080"
+  AllowedHosts: "*"
+  Serilog__MinimumLevel__Default: "Information"
+  Serilog__MinimumLevel__Override__Microsoft.AspNetCore: "Warning"
+  SqsSettings__FilaConsumo: "techchallenge-oficina-os-service.fifo"
+  SqsSettings__FilaPublicacao: "techchallenge-oficina-management.fifo"
+  AWS_REGION: "us-east-1"

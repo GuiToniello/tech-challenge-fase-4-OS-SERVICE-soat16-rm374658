@@ -1,0 +1,70 @@
+name: Destroy
+# Destrutivo: exige confirmação por input e aprovação no Environment "destroy". Os dados do RDS do OS Service são perdidos.
+# Rode antes do Destroy do repo MANAGEMENT: o RDS daqui usa as subnets privadas e o SG dos nodes criados por ele,
+# e o DB/infra encontra a VPC pelo cluster EKS.
+# Ordem: namespace os-service no EKS (se o cluster existir) → RDS (DB/infra).
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Digite "destroy" para confirmar a remoção do namespace os-service no EKS e do RDS do OS Service'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  # Falha visível em vez de um run "verde" que não destruiu nada
+  reject:
+    if: inputs.confirm != 'destroy' || github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "::error::Destroy não executado: informe confirm=destroy e rode a partir da branch main."
+          exit 1
+
+  gate:
+    if: inputs.confirm == 'destroy' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: destroy
+    steps:
+      - run: echo "Destroy aprovado"
+
+  # Tira a API do ar antes do RDS. Sem o cluster (Destroy da MANAGEMENT já rodou), não há o que remover
+  k8s-delete:
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: azure/setup-kubectl@v5
+
+      - name: Remover o namespace os-service
+        env:
+          EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
+          REGION: ${{ vars.AWS_REGION }}
+        run: |
+          if [ -z "$EKS_CLUSTER_NAME" ]; then
+            echo "::error::EKS_CLUSTER_NAME não configurado (Settings → Secrets and variables → Actions)."
+            exit 1
+          fi
+          if aws eks describe-cluster --name "$EKS_CLUSTER_NAME" > /dev/null 2>&1; then
+            aws eks update-kubeconfig --name "$EKS_CLUSTER_NAME" --region "$REGION"
+            kubectl delete namespace os-service --ignore-not-found --wait=true
+          else
+            echo "::notice::Cluster $EKS_CLUSTER_NAME não encontrado: nada a remover no Kubernetes."
+          fi
+
+  terraform-destroy-db:
+    needs: k8s-delete
+    uses: ./.github/workflows/_terraform.yml
+    with:
+      working-directory: DB/infra
+      command: destroy
+    secrets: inherit

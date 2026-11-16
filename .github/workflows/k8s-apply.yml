@@ -1,0 +1,25 @@
+name: K8s Apply
+# Reaplica os manifests (kubernetes/k8s/) no EKS e, por padrão, reinicia a API.
+# Requer o ambiente de pé (Bootstrap da MANAGEMENT e deste repo) e a imagem no ECR. Útil depois de
+# recriar a chave do SQS no repo MANAGEMENT (para trocar RDS_PASSWORD, rode o Bootstrap: a senha nova
+# também precisa ser aplicada no RDS).
+
+on:
+  workflow_dispatch:
+    inputs:
+      restart-pods:
+        description: "Reiniciar os pods da API após o apply (imagem nova no ECR ou Secret alterado)"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    uses: ./.github/workflows/_k8s-apply.yml
+    with:
+      command: apply
+      restart-pods: ${{ inputs.restart-pods }}
+    secrets: inherit

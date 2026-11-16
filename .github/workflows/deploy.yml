@@ -1,0 +1,107 @@
+name: Deploy
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Pushes na main rodam um de cada vez, na ordem: um push antigo não aplica a infra nem publica :latest depois de um mais novo
+concurrency:
+  group: ${{ github.event_name == 'push' && 'deploy-main' || format('deploy-pr-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
+
+jobs:
+  # ---------- Pull Request e push ----------
+
+  # PR: check obrigatório ("build-test / build-test"). Push: valida antes de publicar a imagem
+  build-test:
+    uses: ./.github/workflows/_build-test.yml
+
+  # ---------- Pull Request ----------
+
+  # Checks obrigatórios da main: não usam credenciais AWS
+  validate-db:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/_terraform.yml
+    with:
+      working-directory: DB/infra
+      command: validate
+    secrets: inherit
+
+  validate-k8s:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/_k8s-apply.yml
+    with:
+      command: validate
+    secrets: inherit
+
+  # Informativo: depende da AWS (o plan do DB exige o cluster EKS do repo MANAGEMENT de pé). Não roda em PR de fork (sem secrets)
+  plan-db:
+    needs: validate-db
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    uses: ./.github/workflows/_terraform.yml
+    with:
+      working-directory: DB/infra
+      command: plan
+    secrets: inherit
+
+  # ---------- Push na main ----------
+
+  # Aplica só as partes que mudaram, sempre na ordem: DB → imagem → manifests
+  changes:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.filter.outputs.app }}
+      db: ${{ steps.filter.outputs.db }}
+      k8s: ${{ steps.filter.outputs.k8s }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            app:
+              - 'server/**'
+              - 'docker-compose.yml'
+              - '.github/workflows/_build-test.yml'
+              - '.github/workflows/_build-push.yml'
+            db:
+              - 'DB/infra/**'
+              - '.github/workflows/_terraform.yml'
+            k8s:
+              - 'kubernetes/k8s/**'
+              - '.github/workflows/_k8s-apply.yml'
+
+  # O RDS usa a VPC, as subnets e o SG dos nodes criados pelo repo MANAGEMENT
+  apply-db:
+    needs: changes
+    if: needs.changes.outputs.db == 'true'
+    uses: ./.github/workflows/_terraform.yml
+    with:
+      working-directory: DB/infra
+      command: apply
+    secrets: inherit
+
+  build-push:
+    needs: [changes, build-test, apply-db]
+    if: ${{ !failure() && !cancelled() && needs.changes.outputs.app == 'true' }}
+    uses: ./.github/workflows/_build-push.yml
+    with:
+      image-tag: latest # os manifests em kubernetes/k8s usam :latest
+    secrets: inherit
+
+  # Sempre com restart: a imagem usa a tag fixa latest, e ConfigMap/Secret não têm hash no nome.
+  # Roda também quando o RDS muda (endpoint novo do RDS no Secret)
+  apply-k8s:
+    needs: [changes, build-push]
+    if: ${{ !failure() && !cancelled() && (needs.changes.outputs.k8s == 'true' || needs.changes.outputs.app == 'true' || needs.changes.outputs.db == 'true') }}
+    uses: ./.github/workflows/_k8s-apply.yml
+    with:
+      command: apply
+      restart-pods: true
+    secrets: inherit

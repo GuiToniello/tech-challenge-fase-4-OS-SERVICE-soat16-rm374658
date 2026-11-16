@@ -1,0 +1,61 @@
+using TechChallenge.Oficina.OsService.Entities.Features.Indicadores;
+using TechChallenge.Oficina.OsService.Entities.Features.OrdensServico.Enums;
+using TechChallenge.Oficina.OsService.UseCases.Features.Indicadores.Queries;
+using TechChallenge.Oficina.OsService.UseCases.Features.Indicadores.ViewModels;
+using TechChallenge.Oficina.OsService.UseCases.Features.OrdensServico.UseCases;
+
+namespace TechChallenge.Oficina.OsService.UseCases.Features.Indicadores.UseCases;
+
+public sealed class IndicadorUseCases : IIndicadorUseCases
+{
+    private readonly IIndicadorGateway _indicadorGateway;
+    private readonly IOrdemServicoGateway _ordemServicoGateway;
+
+    public IndicadorUseCases(IIndicadorGateway indicadorGateway, IOrdemServicoGateway ordemServicoGateway)
+    {
+        _indicadorGateway = indicadorGateway;
+        _ordemServicoGateway = ordemServicoGateway;
+    }
+
+    public async Task<IndicadorViewModel> ObterAsync(ObterIndicadoresQuery query, CancellationToken cancellationToken = default)
+    {
+        var indicador = await _indicadorGateway.ObterAsync(cancellationToken);
+
+        if (indicador is null)
+        {
+            return new IndicadorViewModel();
+        }
+
+        return new IndicadorViewModel
+        {
+            TempoMedioExecucao = indicador.TempoMedioExecucao,
+            TempoMedioEntrega = indicador.TempoMedioEntrega
+        };
+    }
+
+    public async Task AtualizarAsync(CancellationToken cancellationToken = default)
+    {
+        var ordensEntregues = await _ordemServicoGateway.ListarPorStatusAsync(StatusOrdemServico.Entregue, cancellationToken);
+        // Orçamento recusado leva a OS direto para Finalizada, sem passar por EmExecucao; essas OS ficam fora do tempo médio de execução.
+        var temposExecucao = ordensEntregues
+            .Where(ordemServico => ordemServico.HistoricoStatus.Any(historico => historico.Status == StatusOrdemServico.EmExecucao))
+            .Select(ordemServico => ordemServico.ObterTempoExecucao())
+            .ToArray();
+        var temposEntrega = ordensEntregues.Select(ordemServico => ordemServico.ObterTempoEntrega()).ToArray();
+
+        var indicador = await _indicadorGateway.ObterAsync(cancellationToken) ?? Indicador.Criar(TimeSpan.Zero, TimeSpan.Zero);
+        indicador.Atualizar(CalcularMedia(temposExecucao), CalcularMedia(temposEntrega));
+        await _indicadorGateway.SalvarAsync(indicador, cancellationToken);
+    }
+
+    private static TimeSpan CalcularMedia(TimeSpan[] intervalos)
+    {
+        if (intervalos.Length == 0)
+        {
+            return TimeSpan.Zero;
+        }
+
+        var mediaTicks = intervalos.Average(intervalo => intervalo.Ticks);
+        return TimeSpan.FromTicks(Convert.ToInt64(mediaTicks));
+    }
+}

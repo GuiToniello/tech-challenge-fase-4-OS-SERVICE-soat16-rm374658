@@ -1,0 +1,34 @@
+<Solution>
+  <Folder Name="/1 - Frameworks &amp; Drivers/">
+    <Project Path="1 - Frameworks &amp; Drivers/TechChallenge.Oficina.OsService.API/TechChallenge.Oficina.OsService.API.csproj" />
+    <Project Path="1 - Frameworks &amp; Drivers/TechChallenge.Oficina.OsService.DB/TechChallenge.Oficina.OsService.DB.csproj" />
+    <Project Path="1 - Frameworks &amp; Drivers/TechChallenge.Oficina.OsService.Messaging/TechChallenge.Oficina.OsService.Messaging.csproj" />
+  </Folder>
+  <Folder Name="/2 - Interface Adapters/">
+    <Project Path="2 - Interface Adapters/TechChallenge.Oficina.OsService.Adapters/TechChallenge.Oficina.OsService.Adapters.csproj" />
+    <Project Path="2 - Interface Adapters/TechChallenge.Oficina.OsService.Controllers/TechChallenge.Oficina.OsService.Controllers.csproj" />
+  </Folder>
+  <Folder Name="/3 - Application Business Rules/">
+    <Project Path="3 - Application Business Rules/TechChallenge.Oficina.OsService.UseCases/TechChallenge.Oficina.OsService.UseCases.csproj" />
+  </Folder>
+  <Folder Name="/4 - Enterprise Business Rules/">
+    <Project Path="4 - Enterprise Business Rules/TechChallenge.Oficina.OsService.Entities/TechChallenge.Oficina.OsService.Entities.csproj" />
+  </Folder>
+  <Folder Name="/ADR/">
+    <File Path="../docs/adr/ADR-019-OS-Service-Microsservico-com-Banco-Proprio.md" />
+  </Folder>
+  <Folder Name="/E2E/">
+    <File Path="../e2e/TechChallenge.Oficina.OsService.API.postman_collection.json" />
+    <File Path="../e2e/AWS.postman_environment.json" />
+  </Folder>
+  <Folder Name="/Tests/">
+    <Project Path="Tests/TechChallenge.Oficina.OsService.API.Tests/TechChallenge.Oficina.OsService.API.Tests.csproj" />
+    <Project Path="Tests/TechChallenge.Oficina.OsService.UseCases.Tests/TechChallenge.Oficina.OsService.UseCases.Tests.csproj" />
+    <Project Path="Tests/TechChallenge.Oficina.OsService.Adapters.Tests/TechChallenge.Oficina.OsService.Adapters.Tests.csproj" />
+    <Project Path="Tests/TechChallenge.Oficina.OsService.Controllers.Tests/TechChallenge.Oficina.OsService.Controllers.Tests.csproj" />
+    <Project Path="Tests/TechChallenge.Oficina.OsService.Entities.Tests/TechChallenge.Oficina.OsService.Entities.Tests.csproj" />
+    <Project Path="Tests/TechChallenge.Oficina.OsService.DB.Tests/TechChallenge.Oficina.OsService.DB.Tests.csproj" />
+    <Project Path="Tests/TechChallenge.Oficina.OsService.Messaging.Tests/TechChallenge.Oficina.OsService.Messaging.Tests.csproj" />
+    <Project Path="Tests/TechChallenge.Oficina.OsService.Integration.Tests/TechChallenge.Oficina.OsService.Integration.Tests.csproj" />
+  </Folder>
+</Solution>

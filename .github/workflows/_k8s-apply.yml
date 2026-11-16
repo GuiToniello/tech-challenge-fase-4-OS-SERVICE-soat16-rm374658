@@ -1,0 +1,127 @@
+name: "[Reusable] K8s Apply"
+
+on:
+  workflow_call:
+    inputs:
+      command:
+        description: "validate (kustomize build offline, sem AWS) ou apply (kubectl apply -k kubernetes/k8s no EKS)"
+        required: true
+        type: string
+      restart-pods:
+        description: "Força o rollout restart da API após o apply (usar quando houver imagem nova ou Secret alterado)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  kubectl:
+    runs-on: ubuntu-latest
+    concurrency:
+      # Fora da main o apply usa um grupo próprio: falha no bloqueio abaixo sem cancelar um apply legítimo pendente
+      group: ${{ inputs.command == 'apply' && (github.ref == 'refs/heads/main' && 'os-service-k8s-apply' || format('os-service-k8s-blocked-{0}', github.run_id)) || format('os-service-k8s-{0}-{1}', inputs.command, github.ref) }}
+      cancel-in-progress: ${{ inputs.command != 'apply' }}
+    steps:
+      # apply só a partir da main, mesmo quando disparado manualmente em outra branch
+      - name: Bloquear apply fora da main
+        if: inputs.command == 'apply' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::O apply dos manifests só pode rodar a partir da branch main (ref atual: $GITHUB_REF)"
+          exit 1
+
+      # No apply, usa sempre a ponta da main (não o commit do run): um run antigo que esperou a infra
+      # não sobrescreve manifests mais novos, e um "Re-run" aplica o estado atual
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.command == 'apply' && 'refs/heads/main' || '' }}
+
+      - uses: azure/setup-kubectl@v5
+
+      # Validação offline: o secretGenerator exige kubernetes/k8s/.env, então usa o template com placeholders
+      - name: Kustomize build (offline)
+        if: inputs.command == 'validate'
+        run: |
+          cp kubernetes/k8s/.env.example kubernetes/k8s/.env
+          kubectl kustomize kubernetes/k8s > /dev/null
+
+      - name: Conferir secrets e variables
+        if: inputs.command == 'apply'
+        env:
+          EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
+          RDS_INSTANCE_IDENTIFIER: ${{ vars.RDS_INSTANCE_IDENTIFIER }}
+          RDS_DATABASE: ${{ vars.RDS_DATABASE }}
+          RDS_USERNAME: ${{ vars.RDS_USERNAME }}
+          RDS_PASSWORD: ${{ secrets.RDS_PASSWORD }}
+        run: |
+          missing=0
+          for name in EKS_CLUSTER_NAME RDS_INSTANCE_IDENTIFIER RDS_DATABASE RDS_USERNAME RDS_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name não configurado (Settings → Secrets and variables → Actions)."
+              missing=1
+            fi
+          done
+          exit $missing
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        if: inputs.command == 'apply'
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # O EKS é criado pelo Bootstrap do repo MANAGEMENT
+      - name: Update kubeconfig
+        if: inputs.command == 'apply'
+        run: aws eks update-kubeconfig --name ${{ vars.EKS_CLUSTER_NAME }} --region ${{ vars.AWS_REGION }}
+
+      # O RDS (DB/infra deste repo) é descoberto pelo identifier fixo
+      - name: Descobrir endpoint do RDS
+        if: inputs.command == 'apply'
+        id: rds
+        env:
+          RDS_INSTANCE_IDENTIFIER: ${{ vars.RDS_INSTANCE_IDENTIFIER }}
+        run: |
+          endpoint=$(aws rds describe-db-instances --db-instance-identifier "$RDS_INSTANCE_IDENTIFIER" --query 'DBInstances[0].Endpoint.Address' --output text 2>/dev/null || true)
+          if [ -z "$endpoint" ] || [ "$endpoint" = "None" ]; then
+            echo "::error::O RDS $RDS_INSTANCE_IDENTIFIER não existe ou ainda não tem endpoint. Rode o Bootstrap deste repo (cria o RDS em DB/infra) e aguarde a instância ficar disponível."
+            exit 1
+          fi
+          echo "endpoint=$endpoint" >> "$GITHUB_OUTPUT"
+
+      # Valores passados por env (não interpolados no script), para caracteres como $ e ` na senha não serem interpretados
+      - name: Gerar kubernetes/k8s/.env (secretGenerator do Kustomize)
+        if: inputs.command == 'apply'
+        shell: pwsh
+        env:
+          RDS_ENDPOINT: ${{ steps.rds.outputs.endpoint }}
+          RDS_DATABASE: ${{ vars.RDS_DATABASE }}
+          RDS_USERNAME: ${{ vars.RDS_USERNAME }}
+          RDS_PASSWORD: ${{ secrets.RDS_PASSWORD }}
+        run: |
+          "DatabaseSettings__ConnectionString=Host=$env:RDS_ENDPOINT;Port=5432;Database=$env:RDS_DATABASE;Username=$env:RDS_USERNAME;Password=$env:RDS_PASSWORD" | Set-Content kubernetes/k8s/.env
+
+      # Chave de acesso do usuário IAM do OS Service nas filas SQS: criada pelo SQS/infra do repo MANAGEMENT
+      # e guardada no SSM Parameter Store. Mascarada antes de ir para o .env, para nunca aparecer no log
+      - name: Adicionar a chave do SQS ao kubernetes/k8s/.env
+        if: inputs.command == 'apply'
+        run: |
+          for pair in AWS_ACCESS_KEY_ID=access-key-id AWS_SECRET_ACCESS_KEY=secret-access-key; do
+            param="/techchallenge-oficina/sqs/os-service/${pair#*=}"
+            value=$(aws ssm get-parameter --name "$param" --with-decryption --query Parameter.Value --output text 2>/dev/null || true)
+            if [ -z "$value" ] || [ "$value" = "None" ]; then
+              echo "::error::Parâmetro $param não encontrado no SSM. Rode o Bootstrap da MANAGEMENT (terraform-sqs) antes."
+              exit 1
+            fi
+            echo "::add-mask::$value"
+            echo "${pair%%=*}=$value" >> kubernetes/k8s/.env
+          done
+
+      - name: Apply manifests
+        if: inputs.command == 'apply'
+        run: kubectl apply -k kubernetes/k8s
+
+      - name: Rollout restart
+        if: inputs.command == 'apply' && inputs.restart-pods
+        run: kubectl rollout restart deployment -n os-service -l app.kubernetes.io/part-of=techchallenge-oficina

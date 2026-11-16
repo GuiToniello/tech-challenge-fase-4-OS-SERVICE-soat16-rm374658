@@ -1,0 +1,58 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: oficina-os-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-oficina_os}
+      POSTGRES_USER: ${POSTGRES_USER:-sa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-P@ssw0rd123}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sa} -d ${POSTGRES_DB:-oficina_os}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  elasticmq:
+    image: docker.io/softwaremill/elasticmq-native:1.6.14
+    container_name: oficina-os-elasticmq
+    ports:
+      - "${ELASTICMQ_PORT:-9325}:9324"
+    volumes:
+      - ./elasticmq.conf:/opt/elasticmq.conf:ro
+    restart: unless-stopped
+
+  os-service-api:
+    image: ${REGISTRY_PREFIX:-}techchallenge-oficina-os-service:${IMAGE_TAG:-latest}
+    build:
+      context: ./server
+      dockerfile: 1 - Frameworks & Drivers/TechChallenge.Oficina.OsService.API/Dockerfile
+    container_name: oficina-os-service-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      elasticmq:
+        condition: service_started
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_URLS: ${ASPNETCORE_URLS:-http://+:8080}
+      AllowedHosts: ${ALLOWED_HOSTS:-*}
+      Serilog__MinimumLevel__Default: ${LOG_LEVEL_DEFAULT:-Information}
+      Serilog__MinimumLevel__Override__Microsoft.AspNetCore: ${LOG_LEVEL_ASPNETCORE:-Warning}
+      DatabaseSettings__ConnectionString: ${DATABASE_CONNECTION_STRING:-Host=postgres;Port=5432;Database=oficina_os;Username=sa;Password=P@ssw0rd123}
+      SqsSettings__FilaConsumo: techchallenge-oficina-os-service.fifo
+      SqsSettings__FilaPublicacao: techchallenge-oficina-management.fifo
+      SqsSettings__ServiceUrl: ${SQS_SERVICE_URL:-http://elasticmq:9324}
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+      AWS_REGION: us-east-1
+    ports:
+      - "${API_OS_SERVICE_PORT:-7195}:8080"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

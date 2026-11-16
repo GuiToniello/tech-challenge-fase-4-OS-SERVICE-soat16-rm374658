@@ -1,0 +1,29 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: os-service-api
+  namespace: os-service
+  labels:
+    app.kubernetes.io/name: os-service-api
+    app.kubernetes.io/part-of: techchallenge-oficina
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: os-service-api
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 30
+    # Memória em 150% do request (192Mi): com o tracer .NET do Datadog, o uso em repouso passa dos 80% (~102Mi) e o HPA escalaria sem carga
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 150
