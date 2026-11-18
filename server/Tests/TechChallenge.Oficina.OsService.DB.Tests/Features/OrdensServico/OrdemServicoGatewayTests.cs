@@ -167,7 +167,7 @@ public sealed class OrdemServicoGatewayTests
 
         var emExecucao = CriarOrdem(dataCadastro: Hora(4));
         emExecucao.RegistrarOrcamentoGerado(100m, Hora(8));
-        emExecucao.RegistrarOrcamentoAprovado(Hora(9));
+        emExecucao.RegistrarPagamentoAprovado(Hora(9));
 
         var finalizada = CriarOrdem(dataCadastro: Hora(1));
         finalizada.RegistrarOrcamentoGerado(100m, Hora(2));

@@ -12,7 +12,8 @@ spec:
     kind: Deployment
     name: os-service-api
   minReplicas: 1
-  maxReplicas: 5
+  # Máximo de 3 réplicas por API: 3 APIs × 3 + 10 pods de sistema = 19, dentro dos 22 pods que cabem nos 2 nodes t3.small
+  maxReplicas: 3
   metrics:
     - type: Resource
       resource:

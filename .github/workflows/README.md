@@ -21,8 +21,8 @@ A rede, o EKS, o API Gateway (rota `/os`), o NLB, o Datadog e as filas SQS ficam
 ```
 
 **Ordem com os outros repositórios:**
-- **Para subir:** Bootstrap do MANAGEMENT → Bootstrap deste repo → Deploy do [LAMBDA](https://github.com/GuiToniello/tech-challenge-fase-4-LAMBDA-soat16-rm374658).
-- **Para derrubar:** Destroy deste repo (e o do LAMBDA) → Destroy do MANAGEMENT. O Destroy do MANAGEMENT falha se o RDS `techchallenge-oficina-os-postgres` ou o SG `techchallenge-oficina-os-rds-sg` ainda existirem.
+- **Para subir:** Bootstrap do MANAGEMENT → Bootstraps deste repo e do [BILLING](https://github.com/GuiToniello/tech-challenge-fase-4-BILLING-soat16-rm374658), em qualquer ordem (um não depende do outro) → Deploy do [LAMBDA](https://github.com/GuiToniello/tech-challenge-fase-4-LAMBDA-soat16-rm374658).
+- **Para derrubar:** Destroy deste repo, do BILLING e do LAMBDA, em qualquer ordem → Destroy do MANAGEMENT. O Destroy do MANAGEMENT falha se o RDS `techchallenge-oficina-os-postgres` ou o SG `techchallenge-oficina-os-rds-sg` ainda existirem.
 
 ## 1. Workflows reutilizáveis
 

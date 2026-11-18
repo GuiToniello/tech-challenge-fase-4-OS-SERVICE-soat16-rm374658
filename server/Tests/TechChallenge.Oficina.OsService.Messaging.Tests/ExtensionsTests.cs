@@ -16,7 +16,7 @@ public sealed class ExtensionsTests
     private static SqsSettings CriarSettings(string filaConsumo) => new()
     {
         FilaConsumo = filaConsumo,
-        FilaPublicacao = "techchallenge-oficina-management.fifo",
+        FilasPublicacao = ["techchallenge-oficina-management.fifo", "techchallenge-oficina-billing.fifo"],
         ServiceUrl = "http://localhost:9325"
     };
 

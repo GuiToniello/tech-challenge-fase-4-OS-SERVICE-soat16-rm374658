@@ -35,8 +35,8 @@ public sealed class SqsConsumidorHostedServiceTests : IDisposable
     private SqsConsumidorHostedService CriarConsumidor() =>
         new(_sqsClientMock.Object, _serviceProvider.GetRequiredService<IServiceScopeFactory>(), new SqsSettings { FilaConsumo = FilaConsumo }, _loggerMock.Object);
 
-    private MensagemSqs CriarMensagem(string tipo = "OrcamentoAprovado") =>
-        new("mensagem-1", "recibo-1", $$$"""{"id":"{{{_eventoId}}}","tipo":"{{{tipo}}}","versao":1,"ocorridoEm":"2026-11-14T12:00:00.0000000Z","origem":"management","dados":{"ordemServicoId":"{{{_ordemServicoId}}}"}}""");
+    private MensagemSqs CriarMensagem(string tipo = "PagamentoAprovado", string mensagemId = "mensagem-1", string recibo = "recibo-1") =>
+        new(mensagemId, recibo, $$$"""{"id":"{{{_eventoId}}}","tipo":"{{{tipo}}}","versao":1,"ocorridoEm":"2026-11-14T12:00:00.0000000Z","origem":"billing","dados":{"ordemServicoId":"{{{_ordemServicoId}}}","pagamentoId":"{{{Guid.NewGuid()}}}","valor":389.90}}""");
 
     private (LogLevel Nivel, IReadOnlyDictionary<string, object?> Propriedades, Exception? Excecao) ObterRegistroDeLog(EventId evento)
     {
@@ -53,19 +53,20 @@ public sealed class SqsConsumidorHostedServiceTests : IDisposable
     public async Task ProcessarMensagemAsync_DeveEntregarTipoEDadosAoControllerEExcluir_QuandoProcessado()
     {
         _eventosControllerMock
-            .Setup(c => c.ProcessarAsync("OrcamentoAprovado", It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(c => c.ProcessarAsync("PagamentoAprovado", It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(ResultadoProcessamentoEvento.Processado);
 
-        await CriarConsumidor().ProcessarMensagemAsync(UrlFila, CriarMensagem(), CancellationToken.None);
+        var removida = await CriarConsumidor().ProcessarMensagemAsync(UrlFila, CriarMensagem(), CancellationToken.None);
 
+        Assert.True(removida);
         _eventosControllerMock.Verify(c => c.ProcessarAsync(
-            "OrcamentoAprovado",
+            "PagamentoAprovado",
             It.Is<string>(dados => dados.Contains($"\"ordemServicoId\":\"{_ordemServicoId}\"")),
             It.IsAny<CancellationToken>()), Times.Once);
         _sqsClientMock.Verify(c => c.DeleteAsync(UrlFila, "recibo-1", It.IsAny<CancellationToken>()), Times.Once);
         var (nivel, propriedades, _) = ObterRegistroDeLog(OrdemServicoLogEventos.EventoConsumido);
         Assert.Equal(LogLevel.Information, nivel);
-        Assert.Equal("OrcamentoAprovado", propriedades["Tipo"]);
+        Assert.Equal("PagamentoAprovado", propriedades["Tipo"]);
         Assert.Equal(_eventoId, propriedades["EventoId"]);
         Assert.Equal(FilaConsumo, propriedades["Fila"]);
     }
@@ -77,8 +78,9 @@ public sealed class SqsConsumidorHostedServiceTests : IDisposable
             .Setup(c => c.ProcessarAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(ResultadoProcessamentoEvento.Ignorado);
 
-        await CriarConsumidor().ProcessarMensagemAsync(UrlFila, CriarMensagem("EventoDesconhecido"), CancellationToken.None);
+        var removida = await CriarConsumidor().ProcessarMensagemAsync(UrlFila, CriarMensagem("EventoDesconhecido"), CancellationToken.None);
 
+        Assert.True(removida);
         _sqsClientMock.Verify(c => c.DeleteAsync(UrlFila, "recibo-1", It.IsAny<CancellationToken>()), Times.Once);
         var (nivel, propriedades, _) = ObterRegistroDeLog(OrdemServicoLogEventos.EventoIgnorado);
         Assert.Equal(LogLevel.Warning, nivel);
@@ -94,15 +96,16 @@ public sealed class SqsConsumidorHostedServiceTests : IDisposable
             .Setup(c => c.ProcessarAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(falha);
 
-        await CriarConsumidor().ProcessarMensagemAsync(UrlFila, CriarMensagem(), CancellationToken.None);
+        var removida = await CriarConsumidor().ProcessarMensagemAsync(UrlFila, CriarMensagem(), CancellationToken.None);
 
+        Assert.False(removida);
         VerificarMensagemNaoExcluida();
         var (nivel, propriedades, excecao) = ObterRegistroDeLog(OrdemServicoLogEventos.IntegracaoFalha);
         Assert.Equal(LogLevel.Error, nivel);
         Assert.Same(falha, excecao);
         Assert.Equal("sqs", propriedades["Integracao"]);
         Assert.Equal("consumo", propriedades["Operacao"]);
-        Assert.Equal("OrcamentoAprovado", propriedades["Tipo"]);
+        Assert.Equal("PagamentoAprovado", propriedades["Tipo"]);
         Assert.Equal(_eventoId, propriedades["EventoId"]);
         Assert.Equal("mensagem-1", propriedades["MensagemId"]);
     }
@@ -110,11 +113,12 @@ public sealed class SqsConsumidorHostedServiceTests : IDisposable
     [Theory]
     [InlineData("nao e json")]
     [InlineData("""{"id":"1b0f4c1e-8d4a-4b7e-9c21-5a0e7d9f1b23","versao":1,"dados":{}}""")]
-    [InlineData("""{"id":"1b0f4c1e-8d4a-4b7e-9c21-5a0e7d9f1b23","tipo":"OrcamentoAprovado","versao":1}""")]
+    [InlineData("""{"id":"1b0f4c1e-8d4a-4b7e-9c21-5a0e7d9f1b23","tipo":"PagamentoAprovado","versao":1}""")]
     public async Task ProcessarMensagemAsync_NaoDeveExcluirNemProcessar_QuandoMensagemForaDoEnvelope(string corpo)
     {
-        await CriarConsumidor().ProcessarMensagemAsync(UrlFila, new MensagemSqs("mensagem-2", "recibo-2", corpo), CancellationToken.None);
+        var removida = await CriarConsumidor().ProcessarMensagemAsync(UrlFila, new MensagemSqs("mensagem-2", "recibo-2", corpo), CancellationToken.None);
 
+        Assert.False(removida);
         Assert.Empty(_eventosControllerMock.Invocations);
         VerificarMensagemNaoExcluida();
         var (nivel, propriedades, _) = ObterRegistroDeLog(OrdemServicoLogEventos.IntegracaoFalha);
@@ -132,8 +136,9 @@ public sealed class SqsConsumidorHostedServiceTests : IDisposable
             .Setup(c => c.ProcessarAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new OperationCanceledException(cancelamento.Token));
 
-        await CriarConsumidor().ProcessarMensagemAsync(UrlFila, CriarMensagem(), cancelamento.Token);
+        var removida = await CriarConsumidor().ProcessarMensagemAsync(UrlFila, CriarMensagem(), cancelamento.Token);
 
+        Assert.False(removida);
         VerificarMensagemNaoExcluida();
         Assert.DoesNotContain(_loggerMock.Invocations, chamada => chamada.Method.Name == nameof(ILogger.Log) && ((EventId)chamada.Arguments[1]).Id == OrdemServicoLogEventos.IntegracaoFalha.Id);
     }
@@ -148,8 +153,9 @@ public sealed class SqsConsumidorHostedServiceTests : IDisposable
             .Setup(c => c.DeleteAsync(UrlFila, "recibo-1", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("SQS indisponivel"));
 
-        await CriarConsumidor().ProcessarMensagemAsync(UrlFila, CriarMensagem(), CancellationToken.None);
+        var removida = await CriarConsumidor().ProcessarMensagemAsync(UrlFila, CriarMensagem(), CancellationToken.None);
 
+        Assert.False(removida);
         var (nivel, _, _) = ObterRegistroDeLog(OrdemServicoLogEventos.IntegracaoFalha);
         Assert.Equal(LogLevel.Error, nivel);
     }
@@ -188,7 +194,58 @@ public sealed class SqsConsumidorHostedServiceTests : IDisposable
         await consumidor.StopAsync(CancellationToken.None);
 
         _sqsClientMock.Verify(c => c.GetQueueUrlAsync(FilaConsumo, It.IsAny<CancellationToken>()), Times.Once);
-        _eventosControllerMock.Verify(c => c.ProcessarAsync("OrcamentoAprovado", It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+        _eventosControllerMock.Verify(c => c.ProcessarAsync("PagamentoAprovado", It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
         Assert.DoesNotContain(_loggerMock.Invocations, chamada => chamada.Method.Name == nameof(ILogger.Log) && (LogLevel)chamada.Arguments[0] >= LogLevel.Warning);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DeveInterromperOLote_QuandoUmaMensagemFalhar()
+    {
+        // Lote FIFO com 3 eventos da mesma OS: o segundo falha e o terceiro nao pode passar na frente dele
+        var loteConcluido = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var recebimentos = 0;
+
+        _sqsClientMock.Setup(c => c.GetQueueUrlAsync(FilaConsumo, It.IsAny<CancellationToken>())).ReturnsAsync(UrlFila);
+        _sqsClientMock
+            .Setup(c => c.ReceiveAsync(UrlFila, 10, 20, It.IsAny<CancellationToken>()))
+            .Returns<string, int, int, CancellationToken>(async (_, _, _, cancellationToken) =>
+            {
+                if (Interlocked.Increment(ref recebimentos) == 1)
+                {
+                    return
+                    [
+                        CriarMensagem("OrcamentoGerado", "mensagem-1", "recibo-1"),
+                        CriarMensagem("PagamentoAprovado", "mensagem-2", "recibo-2"),
+                        CriarMensagem("OrcamentoRecusado", "mensagem-3", "recibo-3")
+                    ];
+                }
+
+                // Novo recebimento: o lote anterior terminou (ou foi interrompido)
+                loteConcluido.TrySetResult();
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+                return [];
+            });
+        _eventosControllerMock
+            .Setup(c => c.ProcessarAsync("OrcamentoGerado", It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ResultadoProcessamentoEvento.Processado);
+        _eventosControllerMock
+            .Setup(c => c.ProcessarAsync("PagamentoAprovado", It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Banco indisponivel"));
+        _eventosControllerMock
+            .Setup(c => c.ProcessarAsync("OrcamentoRecusado", It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ResultadoProcessamentoEvento.Processado);
+
+        var consumidor = CriarConsumidor();
+        await consumidor.StartAsync(CancellationToken.None);
+        await loteConcluido.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await consumidor.StopAsync(CancellationToken.None);
+
+        _sqsClientMock.Verify(c => c.DeleteAsync(UrlFila, "recibo-1", It.IsAny<CancellationToken>()), Times.Once);
+        _sqsClientMock.Verify(c => c.DeleteAsync(UrlFila, "recibo-2", It.IsAny<CancellationToken>()), Times.Never);
+        _sqsClientMock.Verify(c => c.DeleteAsync(UrlFila, "recibo-3", It.IsAny<CancellationToken>()), Times.Never);
+        _eventosControllerMock.Verify(c => c.ProcessarAsync("PagamentoAprovado", It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+        _eventosControllerMock.Verify(c => c.ProcessarAsync("OrcamentoRecusado", It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        var (_, propriedades, _) = ObterRegistroDeLog(OrdemServicoLogEventos.IntegracaoFalha);
+        Assert.Equal("mensagem-2", propriedades["MensagemId"]);
     }
 }

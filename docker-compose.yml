@@ -45,7 +45,8 @@ services:
       Serilog__MinimumLevel__Override__Microsoft.AspNetCore: ${LOG_LEVEL_ASPNETCORE:-Warning}
       DatabaseSettings__ConnectionString: ${DATABASE_CONNECTION_STRING:-Host=postgres;Port=5432;Database=oficina_os;Username=sa;Password=P@ssw0rd123}
       SqsSettings__FilaConsumo: techchallenge-oficina-os-service.fifo
-      SqsSettings__FilaPublicacao: techchallenge-oficina-management.fifo
+      SqsSettings__FilasPublicacao__0: techchallenge-oficina-management.fifo
+      SqsSettings__FilasPublicacao__1: techchallenge-oficina-billing.fifo
       SqsSettings__ServiceUrl: ${SQS_SERVICE_URL:-http://elasticmq:9324}
       AWS_ACCESS_KEY_ID: local
       AWS_SECRET_ACCESS_KEY: local

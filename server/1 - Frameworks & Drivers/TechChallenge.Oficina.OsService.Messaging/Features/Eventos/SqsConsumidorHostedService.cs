@@ -71,17 +71,22 @@ public sealed class SqsConsumidorHostedService : BackgroundService
                 continue;
             }
 
-            // Em sequencia, para respeitar a ordem dos eventos de cada OS na fila FIFO
+            // Em sequencia, para respeitar a ordem dos eventos de cada OS na fila FIFO. O lote pode trazer varias mensagens da mesma OS:
+            // apos uma falha as demais nao sao processadas e voltam para a fila apos o visibility timeout, sem passar na frente da que falhou.
             foreach (var mensagem in mensagens)
             {
-                await ProcessarMensagemAsync(urlFila, mensagem, stoppingToken);
+                if (!await ProcessarMensagemAsync(urlFila, mensagem, stoppingToken))
+                {
+                    break;
+                }
             }
         }
 
         _logger.LogInformation("Consumidor da fila {Fila} encerrado.", _sqsSettings.FilaConsumo);
     }
 
-    public async Task ProcessarMensagemAsync(string urlFila, MensagemSqs mensagem, CancellationToken cancellationToken)
+    // Indica se a mensagem saiu da fila (processada ou ignorada). Falso: ela fica para nova tentativa e o lote atual e interrompido.
+    public async Task<bool> ProcessarMensagemAsync(string urlFila, MensagemSqs mensagem, CancellationToken cancellationToken)
     {
         string? tipo = null;
         Guid? eventoId = null;
@@ -114,10 +119,12 @@ public sealed class SqsConsumidorHostedService : BackgroundService
             }
 
             await _sqsClient.DeleteAsync(urlFila, mensagem.ReceiptHandle, cancellationToken);
+            return true;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             // Servico encerrando: a mensagem nao e excluida e volta para a fila apos o visibility timeout
+            return false;
         }
         catch (Exception exception)
         {
@@ -130,6 +137,7 @@ public sealed class SqsConsumidorHostedService : BackgroundService
                 tipo,
                 eventoId,
                 mensagem.MessageId);
+            return false;
         }
     }
 

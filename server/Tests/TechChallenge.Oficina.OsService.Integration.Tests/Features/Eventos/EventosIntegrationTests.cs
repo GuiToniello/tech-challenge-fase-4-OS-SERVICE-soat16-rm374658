@@ -10,7 +10,7 @@ using Xunit;
 
 namespace TechChallenge.Oficina.OsService.Integration.Tests.Features.Eventos;
 
-// Saga do lado do OS Service: eventos da Management (JSON como chegam da fila) aplicados pela EventosController
+// Saga do lado do OS Service: eventos da Management e do Billing (JSON como chegam da fila) aplicados pela EventosController
 public sealed class EventosIntegrationTests : IDisposable
 {
     private readonly IntegrationTestFixture _fixture = new();
@@ -33,8 +33,11 @@ public sealed class EventosIntegrationTests : IDisposable
         return ok.Value!;
     }
 
+    private static string DadosPagamentoAprovado(Guid ordemServicoId) =>
+        $$"""{"ordemServicoId":"{{ordemServicoId}}","pagamentoId":"{{Guid.NewGuid()}}","valor":389.90}""";
+
     [Fact]
-    public async Task OrcamentoGeradoEAprovado_DeveLevarOrdemParaEmExecucaoComValorEHistorico()
+    public async Task OrcamentoGeradoEPagamentoAprovado_DeveLevarOrdemParaEmExecucaoComValorEHistorico()
     {
         var ordemId = await CriarOrdemAsync();
 
@@ -43,7 +46,7 @@ public sealed class EventosIntegrationTests : IDisposable
         Assert.Equal((int)StatusOrdemServico.AguardandoAprovacao, aguardando.Status);
         Assert.Equal(389.90m, aguardando.ValorOrcamento);
 
-        Assert.Equal(ResultadoProcessamentoEvento.Processado, await ProcessarAsync("OrcamentoAprovado", $$"""{"ordemServicoId":"{{ordemId}}"}"""));
+        Assert.Equal(ResultadoProcessamentoEvento.Processado, await ProcessarAsync("PagamentoAprovado", DadosPagamentoAprovado(ordemId)));
         var emExecucao = await ObterAcompanhamentoAsync(ordemId);
         Assert.Equal((int)StatusOrdemServico.EmExecucao, emExecucao.Status);
         Assert.Equal(
@@ -95,13 +98,38 @@ public sealed class EventosIntegrationTests : IDisposable
     {
         var ordemId = await CriarOrdemAsync();
         await ProcessarAsync("OrcamentoGerado", $$"""{"ordemServicoId":"{{ordemId}}","valorTotal":100}""");
-        await ProcessarAsync("OrcamentoAprovado", $$"""{"ordemServicoId":"{{ordemId}}"}""");
+        await ProcessarAsync("PagamentoAprovado", DadosPagamentoAprovado(ordemId));
 
-        var repetido = await ProcessarAsync("OrcamentoAprovado", $$"""{"ordemServicoId":"{{ordemId}}"}""");
+        var repetido = await ProcessarAsync("PagamentoAprovado", DadosPagamentoAprovado(ordemId));
 
         Assert.Equal(ResultadoProcessamentoEvento.Ignorado, repetido);
         Assert.Equal(3, (await ObterAcompanhamentoAsync(ordemId)).HistoricoStatus.Count);
         _fixture.EventosPublisherMock.Verify(p => p.PublicarAsync(It.IsAny<OrdemServicoStatusAlterado>(), ordemId, It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task OrcamentoAprovado_ForaDoContrato_DeveSerIgnoradoSemAlterarAOrdem()
+    {
+        // A aprovacao do orcamento sozinha nao inicia a execucao: so o PagamentoAprovado do Billing
+        var ordemId = await CriarOrdemAsync();
+        await ProcessarAsync("OrcamentoGerado", $$"""{"ordemServicoId":"{{ordemId}}","valorTotal":100}""");
+
+        var resultado = await ProcessarAsync("OrcamentoAprovado", $$"""{"ordemServicoId":"{{ordemId}}"}""");
+
+        Assert.Equal(ResultadoProcessamentoEvento.Ignorado, resultado);
+        Assert.Equal((int)StatusOrdemServico.AguardandoAprovacao, (await ObterAcompanhamentoAsync(ordemId)).Status);
+    }
+
+    [Fact]
+    public async Task AguardandoAprovacao_NaoDeveIrParaEmExecucaoPeloHttp()
+    {
+        var ordemId = await CriarOrdemAsync();
+        await ProcessarAsync("OrcamentoGerado", $$"""{"ordemServicoId":"{{ordemId}}","valorTotal":100}""");
+
+        var badRequest = Assert.IsType<BadRequest<Dictionary<string, string?>>>(await _fixture.CriarOrdensServicoEndpoints().AlterarParaEmExecucao(ordemId, CancellationToken.None));
+
+        Assert.Equal("Somente ordem de servico em diagnostico pode ser alterada para em execucao.", badRequest.Value!["message"]);
+        Assert.Equal((int)StatusOrdemServico.AguardandoAprovacao, (await ObterAcompanhamentoAsync(ordemId)).Status);
     }
 
     [Fact]

@@ -50,15 +50,21 @@ public sealed class EventosControllerTests
     }
 
     [Fact]
-    public async Task ProcessarAsync_DeveDespacharOrcamentoAprovado()
+    public async Task ProcessarAsync_DeveDespacharPagamentoAprovado_ComPagamentoEValor()
     {
-        _useCasesMock.Setup(useCases => useCases.ProcessarOrcamentoAprovadoAsync(It.IsAny<OrcamentoAprovado>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(ResultadoProcessamentoEvento.Ignorado);
+        var pagamentoId = Guid.NewGuid();
+        _useCasesMock.Setup(useCases => useCases.ProcessarPagamentoAprovadoAsync(It.IsAny<PagamentoAprovado>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ResultadoProcessamentoEvento.Processado);
 
-        var resultado = await CriarController().ProcessarAsync("OrcamentoAprovado", $$"""{"ordemServicoId":"{{_ordemServicoId}}"}""", CancellationToken.None);
+        var resultado = await CriarController().ProcessarAsync(
+            "PagamentoAprovado",
+            $$"""{"ordemServicoId":"{{_ordemServicoId}}","pagamentoId":"{{pagamentoId}}","valor":389.90}""",
+            CancellationToken.None);
 
-        Assert.Equal(ResultadoProcessamentoEvento.Ignorado, resultado);
-        _useCasesMock.Verify(useCases => useCases.ProcessarOrcamentoAprovadoAsync(It.Is<OrcamentoAprovado>(evento => evento.OrdemServicoId == _ordemServicoId), It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal(ResultadoProcessamentoEvento.Processado, resultado);
+        _useCasesMock.Verify(useCases => useCases.ProcessarPagamentoAprovadoAsync(
+            It.Is<PagamentoAprovado>(evento => evento.OrdemServicoId == _ordemServicoId && evento.PagamentoId == pagamentoId && evento.Valor == 389.90m),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -73,8 +79,11 @@ public sealed class EventosControllerTests
         _useCasesMock.Verify(useCases => useCases.ProcessarOrcamentoRecusadoAsync(It.Is<OrcamentoRecusado>(evento => evento.OrdemServicoId == _ordemServicoId), It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // OrcamentoAprovado saiu do contrato (a OS so entra em execucao com o PagamentoAprovado); OrdemServicoValidada e de interesse do Billing
     [Theory]
     [InlineData("OrdemServicoAberta")]
+    [InlineData("OrdemServicoValidada")]
+    [InlineData("OrcamentoAprovado")]
     [InlineData("EventoDesconhecido")]
     [InlineData("")]
     public async Task ProcessarAsync_DeveIgnorarSemChamarUseCases_QuandoTipoNaoTratado(string tipo)
@@ -91,7 +100,7 @@ public sealed class EventosControllerTests
     [InlineData("nao e json")]
     public async Task ProcessarAsync_DeveLancarJsonException_QuandoDadosInvalidos(string dadosJson)
     {
-        var action = async () => await CriarController().ProcessarAsync("OrcamentoAprovado", dadosJson, CancellationToken.None);
+        var action = async () => await CriarController().ProcessarAsync("PagamentoAprovado", dadosJson, CancellationToken.None);
 
         await Assert.ThrowsAsync<JsonException>(action);
         Assert.Empty(_useCasesMock.Invocations);
@@ -100,10 +109,13 @@ public sealed class EventosControllerTests
     [Fact]
     public async Task ProcessarAsync_DevePropagarExcecaoDoUseCase()
     {
-        _useCasesMock.Setup(useCases => useCases.ProcessarOrcamentoAprovadoAsync(It.IsAny<OrcamentoAprovado>(), It.IsAny<CancellationToken>()))
+        _useCasesMock.Setup(useCases => useCases.ProcessarPagamentoAprovadoAsync(It.IsAny<PagamentoAprovado>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Banco indisponivel"));
 
-        var action = async () => await CriarController().ProcessarAsync("OrcamentoAprovado", $$"""{"ordemServicoId":"{{_ordemServicoId}}"}""", CancellationToken.None);
+        var action = async () => await CriarController().ProcessarAsync(
+            "PagamentoAprovado",
+            $$"""{"ordemServicoId":"{{_ordemServicoId}}","pagamentoId":"{{Guid.NewGuid()}}","valor":100}""",
+            CancellationToken.None);
 
         await Assert.ThrowsAsync<InvalidOperationException>(action);
     }

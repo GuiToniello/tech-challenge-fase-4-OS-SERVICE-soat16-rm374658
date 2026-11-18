@@ -8,7 +8,7 @@ using TechChallenge.Oficina.OsService.UseCases.Features.OrdensServico.UseCases;
 
 namespace TechChallenge.Oficina.OsService.UseCases.Features.Eventos.UseCases;
 
-// Processa os eventos da Management sobre a OS (saga coreografada). E idempotente: a fila entrega pelo menos uma vez,
+// Processa os eventos da Management e do Billing sobre a OS (saga coreografada). E idempotente: a fila entrega pelo menos uma vez,
 // entao OS inexistente ou transicao nao permitida (evento repetido ou fora de ordem) resulta em Ignorado, sem excecao e sem publicar nada.
 public sealed class OrdemServicoEventosUseCases : IOrdemServicoEventosUseCases
 {
@@ -44,12 +44,13 @@ public sealed class OrdemServicoEventosUseCases : IOrdemServicoEventosUseCases
             cancellationToken);
     }
 
-    public Task<ResultadoProcessamentoEvento> ProcessarOrcamentoAprovadoAsync(OrcamentoAprovado evento, CancellationToken cancellationToken = default)
+    public Task<ResultadoProcessamentoEvento> ProcessarPagamentoAprovadoAsync(PagamentoAprovado evento, CancellationToken cancellationToken = default)
     {
+        // Mesma etapa do log de antes (orcamento_aprovacao): a aprovacao do orcamento agora se concretiza com o pagamento aprovado no Billing
         return ProcessarAsync(
             evento.OrdemServicoId,
             OrdemServicoLogEventos.Etapas.OrcamentoAprovacao,
-            (ordemServico, dataAlteracao) => ordemServico.RegistrarOrcamentoAprovado(dataAlteracao),
+            (ordemServico, dataAlteracao) => ordemServico.RegistrarPagamentoAprovado(dataAlteracao),
             cancellationToken);
     }
 

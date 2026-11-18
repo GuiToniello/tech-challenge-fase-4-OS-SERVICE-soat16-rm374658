@@ -40,7 +40,7 @@ public sealed class OrdemServicoEventosUseCasesTests
                 break;
             case StatusOrdemServico.EmExecucao:
                 ordemServico.RegistrarOrcamentoGerado(100m);
-                ordemServico.RegistrarOrcamentoAprovado();
+                ordemServico.RegistrarPagamentoAprovado();
                 break;
             case StatusOrdemServico.Entregue:
                 ordemServico.AlterarParaEmDiagnostico();
@@ -173,44 +173,81 @@ public sealed class OrdemServicoEventosUseCasesTests
         VerificarIgnoradoSemGravarNemPublicar();
     }
 
+    private static PagamentoAprovado CriarPagamentoAprovado(Guid ordemServicoId) => new(ordemServicoId, Guid.NewGuid(), 389.90m);
+
     [Fact]
-    public async Task ProcessarOrcamentoAprovadoAsync_DeveAlterarParaEmExecucaoEPublicar()
+    public async Task ProcessarPagamentoAprovadoAsync_DeveAlterarParaEmExecucaoGravarEPublicar()
     {
         var useCases = CriarUseCases();
         var ordemServico = CriarOrdemNoStatus(StatusOrdemServico.AguardandoAprovacao);
         ConfigurarOrdemExistente(ordemServico);
 
-        var resultado = await useCases.ProcessarOrcamentoAprovadoAsync(new OrcamentoAprovado(ordemServico.Id));
+        var resultado = await useCases.ProcessarPagamentoAprovadoAsync(CriarPagamentoAprovado(ordemServico.Id));
 
         Assert.Equal(ResultadoProcessamentoEvento.Processado, resultado);
         Assert.Equal(StatusOrdemServico.EmExecucao, ordemServico.Status);
+        _ordemServicoGatewayMock.Verify(g => g.AtualizarAsync(ordemServico, It.IsAny<CancellationToken>()), Times.Once);
         VerificarStatusAlteradoPublicado(ordemServico, StatusOrdemServico.AguardandoAprovacao, StatusOrdemServico.EmExecucao);
     }
 
     [Fact]
-    public async Task ProcessarOrcamentoAprovadoAsync_DeveIgnorar_QuandoEventoRepetido()
+    public async Task ProcessarPagamentoAprovadoAsync_DeveIgnorar_QuandoEventoRepetido()
     {
         var useCases = CriarUseCases();
         var ordemServico = CriarOrdemNoStatus(StatusOrdemServico.EmExecucao);
         ConfigurarOrdemExistente(ordemServico);
         var quantidadeHistorico = ordemServico.HistoricoStatus.Count;
 
-        var resultado = await useCases.ProcessarOrcamentoAprovadoAsync(new OrcamentoAprovado(ordemServico.Id));
+        var resultado = await useCases.ProcessarPagamentoAprovadoAsync(CriarPagamentoAprovado(ordemServico.Id));
 
         Assert.Equal(ResultadoProcessamentoEvento.Ignorado, resultado);
         Assert.Equal(quantidadeHistorico, ordemServico.HistoricoStatus.Count);
         VerificarIgnoradoSemGravarNemPublicar();
     }
 
+    [Theory]
+    [InlineData(StatusOrdemServico.Recebida)]
+    [InlineData(StatusOrdemServico.EmDiagnostico)]
+    [InlineData(StatusOrdemServico.Cancelada)]
+    public async Task ProcessarPagamentoAprovadoAsync_DeveIgnorar_QuandoNaoEstiverAguardandoAprovacao(StatusOrdemServico statusAtual)
+    {
+        var useCases = CriarUseCases();
+        var ordemServico = CriarOrdemNoStatus(statusAtual);
+        ConfigurarOrdemExistente(ordemServico);
+
+        var resultado = await useCases.ProcessarPagamentoAprovadoAsync(CriarPagamentoAprovado(ordemServico.Id));
+
+        Assert.Equal(ResultadoProcessamentoEvento.Ignorado, resultado);
+        Assert.Equal(statusAtual, ordemServico.Status);
+        VerificarIgnoradoSemGravarNemPublicar();
+    }
+
     [Fact]
-    public async Task ProcessarOrcamentoAprovadoAsync_DeveIgnorar_QuandoOrdemNaoExiste()
+    public async Task ProcessarPagamentoAprovadoAsync_DeveIgnorar_QuandoOrdemNaoExiste()
     {
         var useCases = CriarUseCases();
 
-        var resultado = await useCases.ProcessarOrcamentoAprovadoAsync(new OrcamentoAprovado(Guid.NewGuid()));
+        var resultado = await useCases.ProcessarPagamentoAprovadoAsync(CriarPagamentoAprovado(Guid.NewGuid()));
 
         Assert.Equal(ResultadoProcessamentoEvento.Ignorado, resultado);
         VerificarIgnoradoSemGravarNemPublicar();
+    }
+
+    [Fact]
+    public async Task ProcessarPagamentoAprovadoAsync_DeveRegistrarStatusAlteradoNaEtapaOrcamentoAprovacao()
+    {
+        var loggerMock = new Mock<ILogger<OrdemServicoEventosUseCases>>();
+        var useCases = CriarUseCases(loggerMock.Object);
+        var ordemServico = CriarOrdemNoStatus(StatusOrdemServico.AguardandoAprovacao);
+        ConfigurarOrdemExistente(ordemServico);
+
+        await useCases.ProcessarPagamentoAprovadoAsync(CriarPagamentoAprovado(ordemServico.Id));
+
+        var invocacao = Assert.Single(loggerMock.Invocations, chamada => chamada.Method.Name == nameof(ILogger.Log) && ((EventId)chamada.Arguments[1]).Id == OrdemServicoLogEventos.OsStatusAlterado.Id);
+        var propriedades = ((IEnumerable<KeyValuePair<string, object?>>)invocacao.Arguments[2]).ToDictionary(propriedade => propriedade.Key, propriedade => propriedade.Value);
+        Assert.Equal("aguardando_aprovacao", propriedades["StatusAnterior"]);
+        Assert.Equal("em_execucao", propriedades["StatusNovo"]);
+        Assert.Equal("orcamento_aprovacao", propriedades["Etapa"]);
     }
 
     [Fact]
@@ -271,7 +308,7 @@ public sealed class OrdemServicoEventosUseCasesTests
             .Setup(p => p.PublicarAsync(It.IsAny<OrdemServicoStatusAlterado>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("SQS indisponivel"));
 
-        var action = async () => await useCases.ProcessarOrcamentoAprovadoAsync(new OrcamentoAprovado(ordemServico.Id));
+        var action = async () => await useCases.ProcessarPagamentoAprovadoAsync(CriarPagamentoAprovado(ordemServico.Id));
 
         await Assert.ThrowsAsync<InvalidOperationException>(action);
         _ordemServicoGatewayMock.Verify(g => g.AtualizarAsync(ordemServico, It.IsAny<CancellationToken>()), Times.Once);

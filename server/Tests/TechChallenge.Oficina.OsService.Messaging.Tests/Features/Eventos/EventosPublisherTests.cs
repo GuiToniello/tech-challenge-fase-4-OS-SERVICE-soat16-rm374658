@@ -14,16 +14,19 @@ namespace TechChallenge.Oficina.OsService.Messaging.Tests.Features.Eventos;
 
 public sealed class EventosPublisherTests
 {
-    private const string FilaPublicacao = "techchallenge-oficina-management.fifo";
-    private const string UrlFila = "http://elasticmq:9324/000000000000/techchallenge-oficina-management.fifo";
+    private const string FilaManagement = "techchallenge-oficina-management.fifo";
+    private const string FilaBilling = "techchallenge-oficina-billing.fifo";
+    private const string UrlFilaManagement = "http://elasticmq:9324/000000000000/techchallenge-oficina-management.fifo";
+    private const string UrlFilaBilling = "http://elasticmq:9324/000000000000/techchallenge-oficina-billing.fifo";
 
     private readonly Mock<ISqsClient> _sqsClientMock = new();
-    private readonly SqsSettings _sqsSettings = new() { FilaPublicacao = FilaPublicacao, FilaConsumo = "techchallenge-oficina-os-service.fifo" };
+    private readonly SqsSettings _sqsSettings = new() { FilasPublicacao = [FilaManagement, FilaBilling], FilaConsumo = "techchallenge-oficina-os-service.fifo" };
     private readonly List<(string Url, string Corpo, string Tipo, string Grupo, string Deduplicacao)> _enviadas = [];
 
     public EventosPublisherTests()
     {
-        _sqsClientMock.Setup(c => c.GetQueueUrlAsync(FilaPublicacao, It.IsAny<CancellationToken>())).ReturnsAsync(UrlFila);
+        _sqsClientMock.Setup(c => c.GetQueueUrlAsync(FilaManagement, It.IsAny<CancellationToken>())).ReturnsAsync(UrlFilaManagement);
+        _sqsClientMock.Setup(c => c.GetQueueUrlAsync(FilaBilling, It.IsAny<CancellationToken>())).ReturnsAsync(UrlFilaBilling);
         _sqsClientMock
             .Setup(c => c.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Callback<string, string, string, string, string, CancellationToken>((url, corpo, tipo, grupo, deduplicacao, _) => _enviadas.Add((url, corpo, tipo, grupo, deduplicacao)))
@@ -33,8 +36,19 @@ public sealed class EventosPublisherTests
     private EventosPublisher CriarPublisher(ILogger<EventosPublisher>? logger = null) =>
         new(_sqsClientMock.Object, _sqsSettings, logger ?? NullLogger<EventosPublisher>.Instance);
 
+    private void ConfigurarFalhaNoEnvio(string urlFila, Exception falha) =>
+        _sqsClientMock
+            .Setup(c => c.SendAsync(urlFila, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(falha);
+
+    private static IReadOnlyList<IReadOnlyDictionary<string, object?>> ObterPropriedadesDosLogs(Mock<ILogger<EventosPublisher>> loggerMock, EventId evento) =>
+        loggerMock.Invocations
+            .Where(chamada => chamada.Method.Name == nameof(ILogger.Log) && ((EventId)chamada.Arguments[1]).Id == evento.Id)
+            .Select(chamada => (IReadOnlyDictionary<string, object?>)((IEnumerable<KeyValuePair<string, object?>>)chamada.Arguments[2]).ToDictionary(propriedade => propriedade.Key, propriedade => propriedade.Value))
+            .ToList();
+
     [Fact]
-    public async Task PublicarAsync_DeveEnviarEnvelopeEmCamelCaseParaAFilaDaManagement()
+    public async Task PublicarAsync_DeveEnviarEnvelopeEmCamelCase()
     {
         var ordemServicoId = Guid.NewGuid();
         var clienteId = Guid.NewGuid();
@@ -43,8 +57,7 @@ public sealed class EventosPublisherTests
 
         await CriarPublisher().PublicarAsync(new OrdemServicoAberta(ordemServicoId, clienteId, veiculoId, [servicoId]), ordemServicoId);
 
-        var (url, corpo, tipo, grupo, deduplicacao) = Assert.Single(_enviadas);
-        Assert.Equal(UrlFila, url);
+        var (_, corpo, tipo, grupo, deduplicacao) = _enviadas[0];
         Assert.Equal("OrdemServicoAberta", tipo);
 
         using var json = JsonDocument.Parse(corpo);
@@ -71,13 +84,34 @@ public sealed class EventosPublisherTests
     }
 
     [Fact]
+    public async Task PublicarAsync_DeveEnviarOMesmoEnvelopeParaCadaFilaDaLista()
+    {
+        var ordemServicoId = Guid.NewGuid();
+
+        await CriarPublisher().PublicarAsync(new OrdemServicoStatusAlterado(ordemServicoId, Guid.NewGuid(), 3, 4), ordemServicoId);
+
+        // Fan-out na ordem da lista: Management e Billing recebem o mesmo corpo, com o mesmo id de envelope (deduplicacao), tipo e grupo
+        Assert.Equal([UrlFilaManagement, UrlFilaBilling], _enviadas.Select(enviada => enviada.Url));
+        Assert.Single(_enviadas.Select(enviada => enviada.Corpo).Distinct());
+        Assert.Single(_enviadas.Select(enviada => enviada.Deduplicacao).Distinct());
+        Assert.All(_enviadas, enviada =>
+        {
+            Assert.Equal("OrdemServicoStatusAlterado", enviada.Tipo);
+            Assert.Equal(ordemServicoId.ToString("D"), enviada.Grupo);
+        });
+
+        using var json = JsonDocument.Parse(_enviadas[0].Corpo);
+        Assert.Equal(json.RootElement.GetProperty("id").GetGuid().ToString("D"), _enviadas[0].Deduplicacao);
+    }
+
+    [Fact]
     public async Task PublicarAsync_DeveSerializarStatusComoNumeros()
     {
         var ordemServicoId = Guid.NewGuid();
 
         await CriarPublisher().PublicarAsync(new OrdemServicoStatusAlterado(ordemServicoId, Guid.NewGuid(), 3, 4), ordemServicoId);
 
-        var (_, corpo, tipo, _, _) = Assert.Single(_enviadas);
+        var (_, corpo, tipo, _, _) = _enviadas[0];
         Assert.Equal("OrdemServicoStatusAlterado", tipo);
         using var json = JsonDocument.Parse(corpo);
         var dados = json.RootElement.GetProperty("dados");
@@ -95,12 +129,14 @@ public sealed class EventosPublisherTests
         await publisher.PublicarAsync(new OrdemServicoExcluida(ordemServicoId), ordemServicoId);
         await publisher.PublicarAsync(new OrdemServicoExcluida(ordemServicoId), ordemServicoId);
 
+        // 2 eventos x 2 filas: um id de envelope por evento, repetido nas duas filas
+        Assert.Equal(4, _enviadas.Count);
         Assert.Equal(2, _enviadas.Select(enviada => enviada.Deduplicacao).Distinct().Count());
         Assert.All(_enviadas, enviada => Assert.Equal(ordemServicoId.ToString("D"), enviada.Grupo));
     }
 
     [Fact]
-    public async Task PublicarAsync_DeveObterUrlDaFilaUmaVez()
+    public async Task PublicarAsync_DeveObterUrlDeCadaFilaUmaVez()
     {
         var publisher = CriarPublisher();
         var ordemServicoId = Guid.NewGuid();
@@ -108,23 +144,29 @@ public sealed class EventosPublisherTests
         await publisher.PublicarAsync(new OrdemServicoExcluida(ordemServicoId), ordemServicoId);
         await publisher.PublicarAsync(new OrdemServicoExcluida(ordemServicoId), ordemServicoId);
 
-        _sqsClientMock.Verify(c => c.GetQueueUrlAsync(FilaPublicacao, It.IsAny<CancellationToken>()), Times.Once);
+        _sqsClientMock.Verify(c => c.GetQueueUrlAsync(FilaManagement, It.IsAny<CancellationToken>()), Times.Once);
+        _sqsClientMock.Verify(c => c.GetQueueUrlAsync(FilaBilling, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task PublicarAsync_DeveRegistrarEventoPublicado()
+    public async Task PublicarAsync_DeveRegistrarEventoPublicadoPorFila()
     {
         var loggerMock = new Mock<ILogger<EventosPublisher>>();
         var ordemServicoId = Guid.NewGuid();
 
         await CriarPublisher(loggerMock.Object).PublicarAsync(new OrdemServicoExcluida(ordemServicoId), ordemServicoId);
 
-        var invocacao = Assert.Single(loggerMock.Invocations, chamada => chamada.Method.Name == nameof(ILogger.Log) && ((EventId)chamada.Arguments[1]).Id == OrdemServicoLogEventos.EventoPublicado.Id);
-        var propriedades = ((IEnumerable<KeyValuePair<string, object?>>)invocacao.Arguments[2]).ToDictionary(propriedade => propriedade.Key, propriedade => propriedade.Value);
-        Assert.Equal(LogLevel.Information, (LogLevel)invocacao.Arguments[0]);
-        Assert.Equal("OrdemServicoExcluida", propriedades["Tipo"]);
-        Assert.Equal(ordemServicoId, propriedades["OrdemServicoId"]);
-        Assert.Equal(FilaPublicacao, propriedades["Fila"]);
+        var registros = ObterPropriedadesDosLogs(loggerMock, OrdemServicoLogEventos.EventoPublicado);
+        Assert.Equal([FilaManagement, FilaBilling], registros.Select(propriedades => propriedades["Fila"]));
+        Assert.All(registros, propriedades =>
+        {
+            Assert.Equal("OrdemServicoExcluida", propriedades["Tipo"]);
+            Assert.Equal(ordemServicoId, propriedades["OrdemServicoId"]);
+        });
+        Assert.Single(registros.Select(propriedades => propriedades["EventoId"]).Distinct());
+        Assert.All(
+            loggerMock.Invocations.Where(chamada => chamada.Method.Name == nameof(ILogger.Log)),
+            chamada => Assert.Equal(LogLevel.Information, (LogLevel)chamada.Arguments[0]));
     }
 
     [Fact]
@@ -133,14 +175,17 @@ public sealed class EventosPublisherTests
         var loggerMock = new Mock<ILogger<EventosPublisher>>();
         var falha = new InvalidOperationException("SQS indisponivel");
         var ordemServicoId = Guid.NewGuid();
-        _sqsClientMock
-            .Setup(c => c.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(falha);
+        ConfigurarFalhaNoEnvio(UrlFilaBilling, falha);
 
         var action = async () => await CriarPublisher(loggerMock.Object).PublicarAsync(new OrdemServicoExcluida(ordemServicoId), ordemServicoId);
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(action);
         Assert.Same(falha, exception);
+
+        // A fila anterior (Management) ja recebeu o evento; a falha e registrada para a fila do Billing
+        var publicado = Assert.Single(ObterPropriedadesDosLogs(loggerMock, OrdemServicoLogEventos.EventoPublicado));
+        Assert.Equal(FilaManagement, publicado["Fila"]);
+
         var invocacao = Assert.Single(loggerMock.Invocations, chamada => chamada.Method.Name == nameof(ILogger.Log) && ((EventId)chamada.Arguments[1]).Id == OrdemServicoLogEventos.IntegracaoFalha.Id);
         var propriedades = ((IEnumerable<KeyValuePair<string, object?>>)invocacao.Arguments[2]).ToDictionary(propriedade => propriedade.Key, propriedade => propriedade.Value);
         Assert.Equal(LogLevel.Error, (LogLevel)invocacao.Arguments[0]);
@@ -148,7 +193,22 @@ public sealed class EventosPublisherTests
         Assert.Equal("sqs", propriedades["Integracao"]);
         Assert.Equal("publicacao", propriedades["Operacao"]);
         Assert.Equal("OrdemServicoExcluida", propriedades["Tipo"]);
-        Assert.DoesNotContain(loggerMock.Invocations, chamada => chamada.Method.Name == nameof(ILogger.Log) && ((EventId)chamada.Arguments[1]).Id == OrdemServicoLogEventos.EventoPublicado.Id);
+        Assert.Equal(FilaBilling, propriedades["Fila"]);
+    }
+
+    [Fact]
+    public async Task PublicarAsync_DeveInterromperNasDemaisFilas_QuandoEnvioNaPrimeiraFalhar()
+    {
+        var loggerMock = new Mock<ILogger<EventosPublisher>>();
+        var ordemServicoId = Guid.NewGuid();
+        ConfigurarFalhaNoEnvio(UrlFilaManagement, new InvalidOperationException("SQS indisponivel"));
+
+        var action = async () => await CriarPublisher(loggerMock.Object).PublicarAsync(new OrdemServicoExcluida(ordemServicoId), ordemServicoId);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(action);
+        _sqsClientMock.Verify(c => c.SendAsync(UrlFilaBilling, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Empty(ObterPropriedadesDosLogs(loggerMock, OrdemServicoLogEventos.EventoPublicado));
+        Assert.Equal(FilaManagement, Assert.Single(ObterPropriedadesDosLogs(loggerMock, OrdemServicoLogEventos.IntegracaoFalha))["Fila"]);
     }
 
     [Fact]

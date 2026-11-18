@@ -40,9 +40,10 @@ var sqsSettings = builder.Configuration
     .Get<SqsSettings>()
     ?? new SqsSettings();
 
-if (string.IsNullOrWhiteSpace(sqsSettings.FilaPublicacao))
+// Fan-out: cada evento da OS é publicado em todas as filas da lista (Management e Billing)
+if (sqsSettings.FilasPublicacao.Length == 0 || sqsSettings.FilasPublicacao.Any(string.IsNullOrWhiteSpace))
 {
-    throw new InvalidOperationException("SqsSettings:FilaPublicacao é obrigatório.");
+    throw new InvalidOperationException("SqsSettings:FilasPublicacao é obrigatório: informe ao menos uma fila, sem itens vazios.");
 }
 
 builder.Services.AddAutoMapper(_ => { }, typeof(OrdemServicoProfile).Assembly);

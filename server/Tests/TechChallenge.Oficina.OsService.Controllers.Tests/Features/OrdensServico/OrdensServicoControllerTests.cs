@@ -275,7 +275,7 @@ public sealed class OrdensServicoControllerTests
         var controller = CriarController(loggerMock.Object);
         var id = Guid.NewGuid();
         _useCasesMock.Setup(useCases => useCases.AlterarStatusParaEmExecucaoAsync(It.Is<AlterarStatusOrdemServicoCommand>(c => c.Id == id), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new DomainException("Somente ordem de servico em diagnostico ou aguardando aprovacao pode ser alterada para em execucao."));
+            .ThrowsAsync(new DomainException("Somente ordem de servico em diagnostico pode ser alterada para em execucao."));
         ConfigurarAdapterParaOrdem();
 
         await controller.AlterarParaEmExecucao(id, CancellationToken.None);

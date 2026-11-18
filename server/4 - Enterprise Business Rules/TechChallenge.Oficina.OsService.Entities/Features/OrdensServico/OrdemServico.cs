@@ -49,7 +49,7 @@ public class OrdemServico
 
     public void Atualizar(Guid clienteId, Guid veiculoId, IReadOnlyCollection<Guid> servicoIds)
     {
-        // Depois do diagnóstico o orçamento já pode ter sido calculado pela Management sobre os dados atuais
+        // Depois do diagnóstico o orçamento já pode ter sido calculado pelo Billing sobre os dados atuais
         if (Status != StatusOrdemServico.Recebida)
         {
             throw new DomainException("Somente ordem de servico recebida pode ser atualizada.");
@@ -70,9 +70,10 @@ public class OrdemServico
 
     public void AlterarParaEmExecucao(DateTime? dataAlteracao = null)
     {
-        if (Status != StatusOrdemServico.EmDiagnostico && Status != StatusOrdemServico.AguardandoAprovacao)
+        // Com orçamento (aguardando aprovação) a execução só começa pelo evento PagamentoAprovado do Billing: o pagamento não pode ser pulado
+        if (Status != StatusOrdemServico.EmDiagnostico)
         {
-            throw new DomainException("Somente ordem de servico em diagnostico ou aguardando aprovacao pode ser alterada para em execucao.");
+            throw new DomainException("Somente ordem de servico em diagnostico pode ser alterada para em execucao.");
         }
 
         DefinirStatus(StatusOrdemServico.EmExecucao, dataAlteracao ?? DateTime.UtcNow);
@@ -119,11 +120,12 @@ public class OrdemServico
         }
     }
 
-    public void RegistrarOrcamentoAprovado(DateTime? dataAprovacao = null)
+    public void RegistrarPagamentoAprovado(DateTime? dataAprovacao = null)
     {
+        // Orçamento aprovado e pago no Billing: só então a OS entra em execução
         if (Status != StatusOrdemServico.AguardandoAprovacao)
         {
-            throw new DomainException("Somente ordem de servico aguardando aprovacao pode ser aprovada.");
+            throw new DomainException("Somente ordem de servico aguardando aprovacao pode ter o pagamento aprovado.");
         }
 
         DefinirStatus(StatusOrdemServico.EmExecucao, dataAprovacao ?? DateTime.UtcNow);

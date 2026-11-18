@@ -454,6 +454,24 @@ public sealed class OrdemServicoUseCasesTests
     }
 
     [Fact]
+    public async Task AlterarStatusParaEmExecucaoAsync_DeveLancarDomainExceptionSemGravarNemPublicar_QuandoAguardandoAprovacao()
+    {
+        // Com orcamento gerado, a execucao so comeca pelo PagamentoAprovado do Billing: a rota manual nao pula o pagamento
+        var useCases = CriarUseCases();
+        var ordemServico = CriarOrdemServico();
+        ordemServico.RegistrarOrcamentoGerado(150m);
+        ConfigurarOrdemExistente(ordemServico);
+
+        var action = async () => await useCases.AlterarStatusParaEmExecucaoAsync(new AlterarStatusOrdemServicoCommand { Id = ordemServico.Id });
+
+        var exception = await Assert.ThrowsAsync<DomainException>(action);
+        Assert.Equal("Somente ordem de servico em diagnostico pode ser alterada para em execucao.", exception.Message);
+        Assert.Equal(StatusOrdemServico.AguardandoAprovacao, ordemServico.Status);
+        _ordemServicoGatewayMock.Verify(g => g.AtualizarAsync(It.IsAny<OrdemServico>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Empty(_eventosPublisherMock.Invocations);
+    }
+
+    [Fact]
     public async Task AlterarStatusParaFinalizadaAsync_DeveAlterarPersistirEPublicarStatusAlterado()
     {
         var useCases = CriarUseCases();

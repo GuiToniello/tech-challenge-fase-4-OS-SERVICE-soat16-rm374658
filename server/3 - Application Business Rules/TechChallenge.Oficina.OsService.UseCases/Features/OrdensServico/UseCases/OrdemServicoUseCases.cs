@@ -13,7 +13,7 @@ using TechChallenge.Oficina.OsService.UseCases.Features.OrdensServico.ViewModels
 namespace TechChallenge.Oficina.OsService.UseCases.Features.OrdensServico.UseCases;
 
 // Toda alteracao e gravada antes de publicar o evento. Se a publicacao falhar, a excecao sobe (o middleware responde 500) e a alteracao ja gravada permanece.
-// Depois de gravar, a publicacao nao e cancelada junto com a requisicao (CancellationToken.None): o evento precisa sair para a Management.
+// Depois de gravar, a publicacao nao e cancelada junto com a requisicao (CancellationToken.None): o evento precisa sair para a Management e o Billing.
 public sealed class OrdemServicoUseCases : IOrdemServicoUseCases
 {
     private readonly IMapper _mapper;

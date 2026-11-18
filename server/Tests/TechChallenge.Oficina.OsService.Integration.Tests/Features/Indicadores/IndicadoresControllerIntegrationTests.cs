@@ -64,7 +64,7 @@ public sealed class IndicadoresControllerIntegrationTests : IDisposable
 
         Assert.IsType<Ok<OrdemServicoViewModel>>(await endpoints.AlterarParaEmDiagnostico(ordemExecutadaId, CancellationToken.None));
         await _fixture.CriarEventosController().ProcessarAsync("OrcamentoGerado", $$"""{"ordemServicoId":"{{ordemExecutadaId}}","valorTotal":80}""", CancellationToken.None);
-        await _fixture.CriarEventosController().ProcessarAsync("OrcamentoAprovado", $$"""{"ordemServicoId":"{{ordemExecutadaId}}"}""", CancellationToken.None);
+        await _fixture.CriarEventosController().ProcessarAsync("PagamentoAprovado", $$"""{"ordemServicoId":"{{ordemExecutadaId}}","pagamentoId":"{{Guid.NewGuid()}}","valor":80}""", CancellationToken.None);
         Assert.IsType<Ok<OrdemServicoViewModel>>(await _fixture.CriarOrdensServicoEndpoints().AlterarParaFinalizada(ordemExecutadaId, CancellationToken.None));
         var entregue = Assert.IsType<Ok<OrdemServicoViewModel>>(await _fixture.CriarOrdensServicoEndpoints().AlterarParaEntregue(ordemExecutadaId, CancellationToken.None));
         Assert.Equal(6, entregue.Value!.Status);

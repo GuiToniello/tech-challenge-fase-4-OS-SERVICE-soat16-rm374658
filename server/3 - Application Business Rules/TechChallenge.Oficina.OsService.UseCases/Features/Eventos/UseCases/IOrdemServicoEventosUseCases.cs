@@ -6,6 +6,6 @@ public interface IOrdemServicoEventosUseCases
 {
     Task<ResultadoProcessamentoEvento> ProcessarRejeitadaAsync(OrdemServicoRejeitada evento, CancellationToken cancellationToken = default);
     Task<ResultadoProcessamentoEvento> ProcessarOrcamentoGeradoAsync(OrcamentoGerado evento, CancellationToken cancellationToken = default);
-    Task<ResultadoProcessamentoEvento> ProcessarOrcamentoAprovadoAsync(OrcamentoAprovado evento, CancellationToken cancellationToken = default);
+    Task<ResultadoProcessamentoEvento> ProcessarPagamentoAprovadoAsync(PagamentoAprovado evento, CancellationToken cancellationToken = default);
     Task<ResultadoProcessamentoEvento> ProcessarOrcamentoRecusadoAsync(OrcamentoRecusado evento, CancellationToken cancellationToken = default);
 }

@@ -13,5 +13,6 @@ data:
   Serilog__MinimumLevel__Default: "Information"
   Serilog__MinimumLevel__Override__Microsoft.AspNetCore: "Warning"
   SqsSettings__FilaConsumo: "techchallenge-oficina-os-service.fifo"
-  SqsSettings__FilaPublicacao: "techchallenge-oficina-management.fifo"
+  SqsSettings__FilasPublicacao__0: "techchallenge-oficina-management.fifo"
+  SqsSettings__FilasPublicacao__1: "techchallenge-oficina-billing.fifo"
   AWS_REGION: "us-east-1"

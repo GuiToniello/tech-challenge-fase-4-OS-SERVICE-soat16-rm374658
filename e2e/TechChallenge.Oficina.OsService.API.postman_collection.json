@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "b6d2c4e8-3f1a-4c7b-9e5d-2a8f6c0b1d43",
     "name": "TechChallenge Oficina OS Service API",
-    "description": "Colecao do OS Service: ordens de servico, indicadores e a saga com a Management (SQS). Local: baseUrl http://localhost:7195 e managementBaseUrl http://localhost:7194. AWS: use o environment AWS (API Gateway, prefixos /os e /management).",
+    "description": "Colecao do OS Service: ordens de servico, indicadores e a saga com a Management e o Billing (SQS). Local: baseUrl http://localhost:7195, managementBaseUrl http://localhost:7194 e billingBaseUrl http://localhost:7196. AWS: use o environment AWS (API Gateway, prefixos /os, /management e /billing).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -1199,7 +1199,7 @@
     },
     {
       "name": "Saga",
-      "description": "Saga coreografada OS Service <-> Management via SQS. Os passos com espera aguardam o consumo do evento pela outra API (tempo_espera_ms). Requer as duas APIs usando o mesmo broker.",
+      "description": "Saga coreografada OS Service, Management e Billing via SQS: a Management valida a OS, o Billing gera e aprova o orcamento e confirma o pagamento, e a OS so entra em execucao com o evento PagamentoAprovado. No modo simulado do Billing (sem AccessToken do Mercado Pago) a verificacao aprova o pagamento; com o Mercado Pago real, pague pelo link do passo 04 antes do passo 05. Os passos com espera aguardam o consumo do evento pela outra API (tempo_espera_ms). Requer as tres APIs usando o mesmo broker.",
       "item": [
         {
           "name": "01 - Abrir OS para Orcamento (201)",
@@ -1241,14 +1241,14 @@
           }
         },
         {
-          "name": "02 - Gerar Orcamento na Management (2xx)",
+          "name": "02 - Gerar Orcamento no Billing (2xx)",
           "event": [
             {
               "listen": "prerequest",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// A Management precisa ter consumido o OrdemServicoAberta antes de gerar o orcamento",
+                  "// A Management valida a OS (OrdemServicoAberta) e o Billing guarda os dados dela (OrdemServicoValidada) antes de gerar o orcamento",
                   "// A saga e assincrona (fila SQS): espera a outra API consumir o evento antes da proxima requisicao",
                   "const espera = Number(pm.variables.get('tempo_espera_ms') || 3000);",
                   "setTimeout(function () {}, espera);"
@@ -1269,9 +1269,9 @@
             "method": "POST",
             "header": [],
             "url": {
-              "raw": "{{managementBaseUrl}}/api/orcamentos/{{os_saga_id}}/gerar",
+              "raw": "{{billingBaseUrl}}/api/orcamentos/{{os_saga_id}}/gerar",
               "host": [
-                "{{managementBaseUrl}}"
+                "{{billingBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -1326,14 +1326,16 @@
           }
         },
         {
-          "name": "04 - Aprovar Orcamento na Management (2xx)",
+          "name": "04 - Aprovar Orcamento no Billing (200)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status 2xx', function () { pm.expect(pm.response.code).to.be.within(200, 299); });"
+                  "// Aprovar cria a cobranca e devolve o link de pagamento (Checkout Pro do Mercado Pago; no modo simulado o link e ficticio)",
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Retorna o link de pagamento', function () { pm.expect(pm.response.json().pagamento.linkPagamento).to.be.a('string').and.not.empty; });"
                 ]
               }
             }
@@ -1342,9 +1344,9 @@
             "method": "POST",
             "header": [],
             "url": {
-              "raw": "{{managementBaseUrl}}/api/orcamentos/{{os_saga_id}}/aprovar",
+              "raw": "{{billingBaseUrl}}/api/orcamentos/{{os_saga_id}}/aprovar",
               "host": [
-                "{{managementBaseUrl}}"
+                "{{billingBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -1356,7 +1358,38 @@
           }
         },
         {
-          "name": "05 - Acompanhamento Em Execucao (200)",
+          "name": "05 - Verificar Pagamento no Billing (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Consulta o pagamento (no modo simulado a verificacao aprova). Aprovado: o Billing publica PagamentoAprovado e a OS vai para em execucao",
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{billingBaseUrl}}/api/pagamentos/{{os_saga_id}}/verificar",
+              "host": [
+                "{{billingBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "pagamentos",
+                "{{os_saga_id}}",
+                "verificar"
+              ]
+            }
+          }
+        },
+        {
+          "name": "06 - Acompanhamento Em Execucao (200)",
           "event": [
             {
               "listen": "prerequest",
@@ -1402,7 +1435,7 @@
           }
         },
         {
-          "name": "06 - Finalizar OS (200)",
+          "name": "07 - Finalizar OS (200)",
           "event": [
             {
               "listen": "test",
@@ -1433,7 +1466,7 @@
           }
         },
         {
-          "name": "07 - Entregar OS (200)",
+          "name": "08 - Entregar OS (200)",
           "event": [
             {
               "listen": "test",
@@ -1464,7 +1497,7 @@
           }
         },
         {
-          "name": "08 - Obter Indicadores apos a Saga (200)",
+          "name": "09 - Obter Indicadores apos a Saga (200)",
           "event": [
             {
               "listen": "test",
@@ -1493,7 +1526,7 @@
           }
         },
         {
-          "name": "09 - Abrir OS com Cliente Inexistente (201)",
+          "name": "10 - Abrir OS com Cliente Inexistente (201)",
           "event": [
             {
               "listen": "prerequest",
@@ -1542,7 +1575,7 @@
           }
         },
         {
-          "name": "10 - Acompanhamento OS Cancelada pela Management (200)",
+          "name": "11 - Acompanhamento OS Cancelada pela Management (200)",
           "event": [
             {
               "listen": "prerequest",
@@ -1595,6 +1628,10 @@
     {
       "key": "managementBaseUrl",
       "value": "http://localhost:7194"
+    },
+    {
+      "key": "billingBaseUrl",
+      "value": "http://localhost:7196"
     },
     {
       "key": "tokenUrl",

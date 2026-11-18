@@ -27,7 +27,7 @@ public sealed class OrdemServicoDomainTests
                 break;
             case StatusOrdemServico.EmExecucao:
                 ordemServico.RegistrarOrcamentoGerado(100m);
-                ordemServico.RegistrarOrcamentoAprovado();
+                ordemServico.RegistrarPagamentoAprovado();
                 break;
             case StatusOrdemServico.Finalizada:
                 ordemServico.AlterarParaEmDiagnostico();
@@ -229,27 +229,34 @@ public sealed class OrdemServicoDomainTests
         Assert.Equal("Somente ordem de servico recebida pode ser alterada para em diagnostico.", exception.Message);
     }
 
-    [Theory]
-    [InlineData(StatusOrdemServico.EmDiagnostico)]
-    [InlineData(StatusOrdemServico.AguardandoAprovacao)]
-    public void AlterarParaEmExecucao_DeveAlterarStatus_QuandoStatusPermitir(StatusOrdemServico statusAtual)
+    [Fact]
+    public void AlterarParaEmExecucao_DeveAlterarStatus_QuandoStatusForEmDiagnostico()
     {
-        var ordemServico = CriarOrdemNoStatus(statusAtual);
+        var ordemServico = CriarOrdemNoStatus(StatusOrdemServico.EmDiagnostico);
 
         ordemServico.AlterarParaEmExecucao();
 
         Assert.Equal(StatusOrdemServico.EmExecucao, ordemServico.Status);
     }
 
-    [Fact]
-    public void AlterarParaEmExecucao_DeveLancar_QuandoStatusForRecebida()
+    // Aguardando aprovacao: a execucao so comeca com o pagamento aprovado (evento do Billing), nunca pela rota manual
+    [Theory]
+    [InlineData(StatusOrdemServico.Recebida)]
+    [InlineData(StatusOrdemServico.AguardandoAprovacao)]
+    [InlineData(StatusOrdemServico.EmExecucao)]
+    [InlineData(StatusOrdemServico.Finalizada)]
+    [InlineData(StatusOrdemServico.Cancelada)]
+    public void AlterarParaEmExecucao_DeveLancar_QuandoStatusNaoForEmDiagnostico(StatusOrdemServico statusAtual)
     {
-        var ordemServico = CriarOrdem();
+        var ordemServico = CriarOrdemNoStatus(statusAtual);
+        var quantidadeHistorico = ordemServico.HistoricoStatus.Count;
 
         var action = () => ordemServico.AlterarParaEmExecucao();
 
         var exception = Assert.Throws<DomainException>(action);
-        Assert.Equal("Somente ordem de servico em diagnostico ou aguardando aprovacao pode ser alterada para em execucao.", exception.Message);
+        Assert.Equal("Somente ordem de servico em diagnostico pode ser alterada para em execucao.", exception.Message);
+        Assert.Equal(statusAtual, ordemServico.Status);
+        Assert.Equal(quantidadeHistorico, ordemServico.HistoricoStatus.Count);
     }
 
     [Fact]
@@ -413,26 +420,51 @@ public sealed class OrdemServicoDomainTests
     }
 
     [Fact]
-    public void RegistrarOrcamentoAprovado_DeveAlterarParaEmExecucao_QuandoAguardandoAprovacao()
+    public void RegistrarPagamentoAprovado_DeveAlterarParaEmExecucaoComHistorico_QuandoAguardandoAprovacao()
     {
         var ordemServico = CriarOrdemNoStatus(StatusOrdemServico.AguardandoAprovacao);
+        var quantidadeHistorico = ordemServico.HistoricoStatus.Count;
 
-        ordemServico.RegistrarOrcamentoAprovado();
+        ordemServico.RegistrarPagamentoAprovado(new DateTime(2024, 01, 01, 11, 00, 00, DateTimeKind.Utc));
 
         Assert.Equal(StatusOrdemServico.EmExecucao, ordemServico.Status);
+        Assert.Equal(quantidadeHistorico + 1, ordemServico.HistoricoStatus.Count);
+        var historico = ordemServico.HistoricoStatus.Last();
+        Assert.Equal(StatusOrdemServico.EmExecucao, historico.Status);
+        Assert.Equal(new DateTime(2024, 01, 01, 11, 00, 00, DateTimeKind.Utc), historico.DataAlteracao);
     }
 
     [Theory]
     [InlineData(StatusOrdemServico.Recebida)]
+    [InlineData(StatusOrdemServico.EmDiagnostico)]
     [InlineData(StatusOrdemServico.EmExecucao)]
-    public void RegistrarOrcamentoAprovado_DeveLancar_QuandoNaoEstiverAguardandoAprovacao(StatusOrdemServico statusAtual)
+    [InlineData(StatusOrdemServico.Finalizada)]
+    [InlineData(StatusOrdemServico.Cancelada)]
+    public void RegistrarPagamentoAprovado_DeveLancar_QuandoNaoEstiverAguardandoAprovacao(StatusOrdemServico statusAtual)
     {
         var ordemServico = CriarOrdemNoStatus(statusAtual);
+        var quantidadeHistorico = ordemServico.HistoricoStatus.Count;
 
-        var action = () => ordemServico.RegistrarOrcamentoAprovado();
+        var action = () => ordemServico.RegistrarPagamentoAprovado();
 
         var exception = Assert.Throws<DomainException>(action);
-        Assert.Equal("Somente ordem de servico aguardando aprovacao pode ser aprovada.", exception.Message);
+        Assert.Equal("Somente ordem de servico aguardando aprovacao pode ter o pagamento aprovado.", exception.Message);
+        Assert.Equal(statusAtual, ordemServico.Status);
+        Assert.Equal(quantidadeHistorico, ordemServico.HistoricoStatus.Count);
+    }
+
+    [Fact]
+    public void DeveCalcularTempoExecucao_APartirDoPagamentoAprovado()
+    {
+        var ordemServico = CriarOrdem(new DateTime(2024, 01, 01, 8, 00, 00, DateTimeKind.Utc));
+        ordemServico.AlterarParaEmDiagnostico(new DateTime(2024, 01, 01, 9, 00, 00, DateTimeKind.Utc));
+        ordemServico.RegistrarOrcamentoGerado(300m, new DateTime(2024, 01, 01, 10, 00, 00, DateTimeKind.Utc));
+        ordemServico.RegistrarPagamentoAprovado(new DateTime(2024, 01, 01, 11, 00, 00, DateTimeKind.Utc));
+        ordemServico.AlterarParaFinalizada(new DateTime(2024, 01, 01, 15, 00, 00, DateTimeKind.Utc));
+        ordemServico.AlterarParaEntregue(new DateTime(2024, 01, 01, 16, 00, 00, DateTimeKind.Utc));
+
+        Assert.Equal(TimeSpan.FromHours(4), ordemServico.ObterTempoExecucao());
+        Assert.Equal(TimeSpan.FromHours(8), ordemServico.ObterTempoEntrega());
     }
 
     [Fact]

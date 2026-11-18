@@ -2,6 +2,7 @@ name: Destroy
 # Destrutivo: exige confirmação por input e aprovação no Environment "destroy". Os dados do RDS do OS Service são perdidos.
 # Rode antes do Destroy do repo MANAGEMENT: o RDS daqui usa as subnets privadas e o SG dos nodes criados por ele,
 # e o DB/infra encontra a VPC pelo cluster EKS.
+# Ordem entre os repos: LAMBDA, este e BILLING (em qualquer ordem) → MANAGEMENT.
 # Ordem: namespace os-service no EKS (se o cluster existir) → RDS (DB/infra).
 
 on:
