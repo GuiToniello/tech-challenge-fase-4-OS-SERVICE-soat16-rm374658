@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "b6d2c4e8-3f1a-4c7b-9e5d-2a8f6c0b1d43",
     "name": "TechChallenge Oficina OS Service API",
-    "description": "Colecao do OS Service: ordens de servico, indicadores e a saga com a Management e o Billing (SQS). Local: baseUrl http://localhost:7195, managementBaseUrl http://localhost:7194 e billingBaseUrl http://localhost:7196. AWS: use o environment AWS (API Gateway, prefixos /os, /management e /billing).",
+    "description": "Colecao do OS Service: ordens de servico, indicadores e a saga com a Management, o Billing e a Execucao e Producao (SQS). Local: baseUrl http://localhost:7195, managementBaseUrl http://localhost:7194, billingBaseUrl http://localhost:7196 e executionBaseUrl http://localhost:7197. AWS: use o environment AWS (API Gateway, prefixos /os, /management, /billing e /execution).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -443,7 +443,7 @@
     },
     {
       "name": "OrdensServico",
-      "description": "CRUD, consultas e mudancas de status da OS feitas pelo HTTP do OS Service. Cliente, veiculo e servico vem do 00 - Setup (Management).",
+      "description": "CRUD, consultas e entrega da OS pelo HTTP do OS Service. O diagnostico e iniciado pela Execucao e Producao (evento DiagnosticoIniciado); sem orcamento e pagamento a OS nao chega a finalizada nesta pasta (o fluxo completo esta na pasta Saga). Cliente, veiculo e servico vem do 00 - Setup (Management). Requer as APIs usando o mesmo broker.",
       "item": [
         {
           "name": "01 - Criar Ordem de Servico (201)",
@@ -887,15 +887,29 @@
           }
         },
         {
-          "name": "14 - Alterar Status para Em Diagnostico (200)",
+          "name": "14 - Iniciar Diagnostico na Execucao (200)",
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// A Execucao e Producao conhece a OS pelo evento OrdemServicoValidada (publicado pela Management ao validar a OrdemServicoAberta)",
+                  "// A saga e assincrona (fila SQS): espera a outra API consumir o evento antes da proxima requisicao",
+                  "const espera = Number(pm.variables.get('tempo_espera_ms') || 3000);",
+                  "setTimeout(function () {}, espera);"
+                ]
+              }
+            },
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// A Execucao e Producao publica DiagnosticoIniciado e o OS Service passa a OS para em diagnostico",
                   "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
-                  "pm.test('Status em diagnostico (2)', function () { pm.expect(pm.response.json().status).to.eql(2); });"
+                  "pm.test('OS confere', function () { pm.expect(pm.response.json().ordemServicoId).to.eql(pm.collectionVariables.get('os_id')); });",
+                  "pm.test('Etapa em diagnostico (2)', function () { pm.expect(pm.response.json().etapa).to.eql(2); });"
                 ]
               }
             }
@@ -904,7 +918,53 @@
             "method": "POST",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/ordens-servico/{{os_id}}/em-diagnostico",
+              "raw": "{{executionBaseUrl}}/api/execucoes/{{os_id}}/iniciar-diagnostico",
+              "host": [
+                "{{executionBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "execucoes",
+                "{{os_id}}",
+                "iniciar-diagnostico"
+              ]
+            }
+          }
+        },
+        {
+          "name": "15 - Acompanhamento Em Diagnostico (200)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// A saga e assincrona (fila SQS): espera a outra API consumir o evento antes da proxima requisicao",
+                  "const espera = Number(pm.variables.get('tempo_espera_ms') || 3000);",
+                  "setTimeout(function () {}, espera);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Status em diagnostico (2) pelo evento DiagnosticoIniciado', function () { pm.expect(pm.response.json().status).to.eql(2); });",
+                  "pm.test('Historico com recebida e em diagnostico', function () {",
+                  "  var status = pm.response.json().historicoStatus.map(function (historico) { return historico.status; });",
+                  "  pm.expect(status).to.include.members([1, 2]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/ordens-servico/{{os_id}}/acompanhamento",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -912,13 +972,13 @@
                 "api",
                 "ordens-servico",
                 "{{os_id}}",
-                "em-diagnostico"
+                "acompanhamento"
               ]
             }
           }
         },
         {
-          "name": "15 - Atualizar Ordem apos Mudanca de Status (400)",
+          "name": "16 - Atualizar Ordem apos Mudanca de Status (400)",
           "event": [
             {
               "listen": "test",
@@ -956,77 +1016,16 @@
           }
         },
         {
-          "name": "16 - Alterar Status para Em Execucao (200)",
+          "name": "17 - Entregar OS em Diagnostico (400)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
-                  "pm.test('Status em execucao (4)', function () { pm.expect(pm.response.json().status).to.eql(4); });"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/ordens-servico/{{os_id}}/em-execucao",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "ordens-servico",
-                "{{os_id}}",
-                "em-execucao"
-              ]
-            }
-          }
-        },
-        {
-          "name": "17 - Alterar Status para Finalizada (200)",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
-                  "pm.test('Status finalizada (5)', function () { pm.expect(pm.response.json().status).to.eql(5); });"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/ordens-servico/{{os_id}}/finalizar",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "ordens-servico",
-                "{{os_id}}",
-                "finalizar"
-              ]
-            }
-          }
-        },
-        {
-          "name": "18 - Alterar Status para Entregue (200)",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
-                  "pm.test('Status entregue (6)', function () { pm.expect(pm.response.json().status).to.eql(6); });"
+                  "// So a OS finalizada pode ser entregue: aqui ela esta em diagnostico",
+                  "pm.test('Status 400', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Mensagem de ordem finalizada', function () { pm.expect((pm.response.json().message || '').toLowerCase()).to.include('finalizada'); });"
                 ]
               }
             }
@@ -1049,7 +1048,7 @@
           }
         },
         {
-          "name": "19 - Obter Indicadores (200)",
+          "name": "18 - Obter Indicadores (200)",
           "event": [
             {
               "listen": "test",
@@ -1078,37 +1077,7 @@
           }
         },
         {
-          "name": "20 - Alterar para Em Diagnostico apos Entregue (400)",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('Status 400', function () { pm.response.to.have.status(400); });"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/ordens-servico/{{os_id}}/em-diagnostico",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "ordens-servico",
-                "{{os_id}}",
-                "em-diagnostico"
-              ]
-            }
-          }
-        },
-        {
-          "name": "21 - Alterar Status de Ordem Inexistente (404)",
+          "name": "19 - Entregar Ordem Inexistente (404)",
           "event": [
             {
               "listen": "test",
@@ -1124,7 +1093,7 @@
             "method": "POST",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/ordens-servico/00000000-0000-0000-0000-000000000000/em-diagnostico",
+              "raw": "{{baseUrl}}/api/ordens-servico/00000000-0000-0000-0000-000000000000/entregar",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -1132,13 +1101,13 @@
                 "api",
                 "ordens-servico",
                 "00000000-0000-0000-0000-000000000000",
-                "em-diagnostico"
+                "entregar"
               ]
             }
           }
         },
         {
-          "name": "22 - Excluir Ordem de Servico (204)",
+          "name": "20 - Excluir Ordem de Servico (204)",
           "event": [
             {
               "listen": "test",
@@ -1167,7 +1136,7 @@
           }
         },
         {
-          "name": "23 - Obter Ordem Removida (404)",
+          "name": "21 - Obter Ordem Removida (404)",
           "event": [
             {
               "listen": "test",
@@ -1199,7 +1168,7 @@
     },
     {
       "name": "Saga",
-      "description": "Saga coreografada OS Service, Management e Billing via SQS: a Management valida a OS, o Billing gera e aprova o orcamento e confirma o pagamento, e a OS so entra em execucao com o evento PagamentoAprovado. No modo simulado do Billing (sem AccessToken do Mercado Pago) a verificacao aprova o pagamento; com o Mercado Pago real, pague pelo link do passo 04 antes do passo 05. Os passos com espera aguardam o consumo do evento pela outra API (tempo_espera_ms). Requer as tres APIs usando o mesmo broker.",
+      "description": "Saga coreografada OS Service, Management, Billing e Execucao e Producao via SQS: a Management valida a OS, a Execucao e Producao inicia o diagnostico, o Billing gera e aprova o orcamento e confirma o pagamento (a OS so entra em execucao com o evento PagamentoAprovado), e a Execucao e Producao conduz a fila de execucao e finaliza a OS (evento ExecucaoFinalizada); a entrega e feita no OS Service. No modo simulado do Billing (sem AccessToken do Mercado Pago) a verificacao aprova o pagamento; com o Mercado Pago real, pague pelo link do passo 06 antes do passo 07. Os passos com espera aguardam o consumo do evento pela outra API (tempo_espera_ms). Requer as quatro APIs usando o mesmo broker.",
       "item": [
         {
           "name": "01 - Abrir OS para Orcamento (201)",
@@ -1241,20 +1210,95 @@
           }
         },
         {
-          "name": "02 - Gerar Orcamento no Billing (2xx)",
+          "name": "02 - Iniciar Diagnostico na Execucao (200)",
           "event": [
             {
               "listen": "prerequest",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// A Management valida a OS (OrdemServicoAberta) e o Billing guarda os dados dela (OrdemServicoValidada) antes de gerar o orcamento",
+                  "// A Management valida a OS (OrdemServicoAberta) e publica OrdemServicoValidada: e por ele que a Execucao e Producao (e o Billing) conhecem a OS",
                   "// A saga e assincrona (fila SQS): espera a outra API consumir o evento antes da proxima requisicao",
                   "const espera = Number(pm.variables.get('tempo_espera_ms') || 3000);",
                   "setTimeout(function () {}, espera);"
                 ]
               }
             },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// A Execucao e Producao publica DiagnosticoIniciado e o OS Service passa a OS para em diagnostico",
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('OS confere', function () { pm.expect(pm.response.json().ordemServicoId).to.eql(pm.collectionVariables.get('os_saga_id')); });",
+                  "pm.test('Etapa em diagnostico (2)', function () { pm.expect(pm.response.json().etapa).to.eql(2); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{executionBaseUrl}}/api/execucoes/{{os_saga_id}}/iniciar-diagnostico",
+              "host": [
+                "{{executionBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "execucoes",
+                "{{os_saga_id}}",
+                "iniciar-diagnostico"
+              ]
+            }
+          }
+        },
+        {
+          "name": "03 - Acompanhamento Em Diagnostico (200)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// A saga e assincrona (fila SQS): espera a outra API consumir o evento antes da proxima requisicao",
+                  "const espera = Number(pm.variables.get('tempo_espera_ms') || 3000);",
+                  "setTimeout(function () {}, espera);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Status em diagnostico (2) pelo evento DiagnosticoIniciado', function () { pm.expect(pm.response.json().status).to.eql(2); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/ordens-servico/{{os_saga_id}}/acompanhamento",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "ordens-servico",
+                "{{os_saga_id}}",
+                "acompanhamento"
+              ]
+            }
+          }
+        },
+        {
+          "name": "04 - Gerar Orcamento no Billing (2xx)",
+          "event": [
             {
               "listen": "test",
               "script": {
@@ -1283,7 +1327,7 @@
           }
         },
         {
-          "name": "03 - Acompanhamento Aguardando Aprovacao (200)",
+          "name": "05 - Acompanhamento Aguardando Aprovacao (200)",
           "event": [
             {
               "listen": "prerequest",
@@ -1326,7 +1370,7 @@
           }
         },
         {
-          "name": "04 - Aprovar Orcamento no Billing (200)",
+          "name": "06 - Aprovar Orcamento no Billing (200)",
           "event": [
             {
               "listen": "test",
@@ -1358,7 +1402,7 @@
           }
         },
         {
-          "name": "05 - Verificar Pagamento no Billing (200)",
+          "name": "07 - Verificar Pagamento no Billing (200)",
           "event": [
             {
               "listen": "test",
@@ -1389,7 +1433,7 @@
           }
         },
         {
-          "name": "06 - Acompanhamento Em Execucao (200)",
+          "name": "08 - Acompanhamento Em Execucao (200)",
           "event": [
             {
               "listen": "prerequest",
@@ -1409,9 +1453,9 @@
                 "exec": [
                   "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
                   "pm.test('Status em execucao (4)', function () { pm.expect(pm.response.json().status).to.eql(4); });",
-                  "pm.test('Historico com aguardando aprovacao e em execucao', function () {",
+                  "pm.test('Historico com diagnostico, aguardando aprovacao e em execucao', function () {",
                   "  var status = pm.response.json().historicoStatus.map(function (historico) { return historico.status; });",
-                  "  pm.expect(status).to.include.members([1, 3, 4]);",
+                  "  pm.expect(status).to.include.members([1, 2, 3, 4]);",
                   "});"
                 ]
               }
@@ -1435,7 +1479,54 @@
           }
         },
         {
-          "name": "07 - Finalizar OS (200)",
+          "name": "09 - Fila de Execucao com a OS (200)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// A Execucao e Producao poe a OS na fila ao consumir o OrdemServicoStatusAlterado do pagamento aprovado (em execucao)",
+                  "// A saga e assincrona (fila SQS): espera a outra API consumir o evento antes da proxima requisicao",
+                  "const espera = Number(pm.variables.get('tempo_espera_ms') || 3000);",
+                  "setTimeout(function () {}, espera);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Retorna array', function () { pm.expect(pm.response.json()).to.be.an('array'); });",
+                  "pm.test('OS da saga na fila aguardando execucao (4)', function () {",
+                  "  var execucao = pm.response.json().find(function (item) { return item.ordemServicoId === pm.collectionVariables.get('os_saga_id'); });",
+                  "  pm.expect(execucao, 'OS da saga na fila').to.be.an('object');",
+                  "  pm.expect(execucao.etapa).to.eql(4);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{executionBaseUrl}}/api/execucoes/fila",
+              "host": [
+                "{{executionBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "execucoes",
+                "fila"
+              ]
+            }
+          }
+        },
+        {
+          "name": "10 - Iniciar Execucao (200)",
           "event": [
             {
               "listen": "test",
@@ -1443,7 +1534,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
-                  "pm.test('Status finalizada (5)', function () { pm.expect(pm.response.json().status).to.eql(5); });"
+                  "pm.test('Etapa em execucao (5)', function () { pm.expect(pm.response.json().etapa).to.eql(5); });"
                 ]
               }
             }
@@ -1452,13 +1543,45 @@
             "method": "POST",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/ordens-servico/{{os_saga_id}}/finalizar",
+              "raw": "{{executionBaseUrl}}/api/execucoes/{{os_saga_id}}/iniciar",
               "host": [
-                "{{baseUrl}}"
+                "{{executionBaseUrl}}"
               ],
               "path": [
                 "api",
-                "ordens-servico",
+                "execucoes",
+                "{{os_saga_id}}",
+                "iniciar"
+              ]
+            }
+          }
+        },
+        {
+          "name": "11 - Finalizar Execucao (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// A Execucao e Producao publica ExecucaoFinalizada e o OS Service passa a OS para finalizada",
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Etapa finalizada (6)', function () { pm.expect(pm.response.json().etapa).to.eql(6); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{executionBaseUrl}}/api/execucoes/{{os_saga_id}}/finalizar",
+              "host": [
+                "{{executionBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "execucoes",
                 "{{os_saga_id}}",
                 "finalizar"
               ]
@@ -1466,7 +1589,53 @@
           }
         },
         {
-          "name": "08 - Entregar OS (200)",
+          "name": "12 - Acompanhamento Finalizada (200)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// A saga e assincrona (fila SQS): espera a outra API consumir o evento antes da proxima requisicao",
+                  "const espera = Number(pm.variables.get('tempo_espera_ms') || 3000);",
+                  "setTimeout(function () {}, espera);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Status finalizada (5) pelo evento ExecucaoFinalizada', function () { pm.expect(pm.response.json().status).to.eql(5); });",
+                  "pm.test('Historico completo da OS', function () {",
+                  "  var status = pm.response.json().historicoStatus.map(function (historico) { return historico.status; });",
+                  "  pm.expect(status).to.eql([1, 2, 3, 4, 5]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/ordens-servico/{{os_saga_id}}/acompanhamento",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "ordens-servico",
+                "{{os_saga_id}}",
+                "acompanhamento"
+              ]
+            }
+          }
+        },
+        {
+          "name": "13 - Entregar OS (200)",
           "event": [
             {
               "listen": "test",
@@ -1497,7 +1666,7 @@
           }
         },
         {
-          "name": "09 - Obter Indicadores apos a Saga (200)",
+          "name": "14 - Obter Indicadores apos a Saga (200)",
           "event": [
             {
               "listen": "test",
@@ -1526,7 +1695,7 @@
           }
         },
         {
-          "name": "10 - Abrir OS com Cliente Inexistente (201)",
+          "name": "15 - Abrir OS com Cliente Inexistente (201)",
           "event": [
             {
               "listen": "prerequest",
@@ -1575,7 +1744,7 @@
           }
         },
         {
-          "name": "11 - Acompanhamento OS Cancelada pela Management (200)",
+          "name": "16 - Acompanhamento OS Cancelada pela Management (200)",
           "event": [
             {
               "listen": "prerequest",
@@ -1632,6 +1801,10 @@
     {
       "key": "billingBaseUrl",
       "value": "http://localhost:7196"
+    },
+    {
+      "key": "executionBaseUrl",
+      "value": "http://localhost:7197"
     },
     {
       "key": "tokenUrl",

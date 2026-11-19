@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http.HttpResults;
 using TechChallenge.Oficina.OsService.Integration.Tests.Infrastructure;
+using TechChallenge.Oficina.OsService.UseCases.Features.Eventos;
 using TechChallenge.Oficina.OsService.UseCases.Features.Indicadores.ViewModels;
 using TechChallenge.Oficina.OsService.UseCases.Features.OrdensServico.Commands;
 using TechChallenge.Oficina.OsService.UseCases.Features.OrdensServico.ViewModels;
@@ -62,10 +63,11 @@ public sealed class IndicadoresControllerIntegrationTests : IDisposable
 
         Assert.IsType<Ok<OrdemServicoViewModel>>(await endpoints.AlterarParaEntregue(ordemRecusadaId, CancellationToken.None));
 
-        Assert.IsType<Ok<OrdemServicoViewModel>>(await endpoints.AlterarParaEmDiagnostico(ordemExecutadaId, CancellationToken.None));
+        // Diagnostico e finalizacao vem da Execucao e Producao; orcamento e pagamento, do Billing
+        Assert.Equal(ResultadoProcessamentoEvento.Processado, await _fixture.CriarEventosController().ProcessarAsync("DiagnosticoIniciado", $$"""{"ordemServicoId":"{{ordemExecutadaId}}"}""", CancellationToken.None));
         await _fixture.CriarEventosController().ProcessarAsync("OrcamentoGerado", $$"""{"ordemServicoId":"{{ordemExecutadaId}}","valorTotal":80}""", CancellationToken.None);
         await _fixture.CriarEventosController().ProcessarAsync("PagamentoAprovado", $$"""{"ordemServicoId":"{{ordemExecutadaId}}","pagamentoId":"{{Guid.NewGuid()}}","valor":80}""", CancellationToken.None);
-        Assert.IsType<Ok<OrdemServicoViewModel>>(await _fixture.CriarOrdensServicoEndpoints().AlterarParaFinalizada(ordemExecutadaId, CancellationToken.None));
+        Assert.Equal(ResultadoProcessamentoEvento.Processado, await _fixture.CriarEventosController().ProcessarAsync("ExecucaoFinalizada", $$"""{"ordemServicoId":"{{ordemExecutadaId}}"}""", CancellationToken.None));
         var entregue = Assert.IsType<Ok<OrdemServicoViewModel>>(await _fixture.CriarOrdensServicoEndpoints().AlterarParaEntregue(ordemExecutadaId, CancellationToken.None));
         Assert.Equal(6, entregue.Value!.Status);
 

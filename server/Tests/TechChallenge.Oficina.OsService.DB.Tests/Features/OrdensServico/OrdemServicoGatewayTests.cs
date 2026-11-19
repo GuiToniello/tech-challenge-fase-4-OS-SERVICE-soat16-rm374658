@@ -140,7 +140,8 @@ public sealed class OrdemServicoGatewayTests
     {
         var entregue = CriarOrdem(dataCadastro: Hora(8));
         entregue.AlterarParaEmDiagnostico(Hora(9));
-        entregue.AlterarParaEmExecucao(Hora(10));
+        entregue.RegistrarOrcamentoGerado(100m, Hora(10));
+        entregue.RegistrarPagamentoAprovado(Hora(10));
         entregue.AlterarParaFinalizada(Hora(11));
         entregue.AlterarParaEntregue(Hora(12));
         await AdicionarAsync(entregue, CriarOrdem());
@@ -150,7 +151,7 @@ public sealed class OrdemServicoGatewayTests
 
         var ordem = Assert.Single(ordens);
         Assert.Equal(entregue.Id, ordem.Id);
-        Assert.Equal(5, ordem.HistoricoStatus.Count);
+        Assert.Equal(6, ordem.HistoricoStatus.Count);
     }
 
     [Fact]
@@ -175,7 +176,8 @@ public sealed class OrdemServicoGatewayTests
 
         var entregue = CriarOrdem(dataCadastro: Hora(1));
         entregue.AlterarParaEmDiagnostico(Hora(2));
-        entregue.AlterarParaEmExecucao(Hora(3));
+        entregue.RegistrarOrcamentoGerado(100m, Hora(3));
+        entregue.RegistrarPagamentoAprovado(Hora(3));
         entregue.AlterarParaFinalizada(Hora(4));
         entregue.AlterarParaEntregue(Hora(5));
 

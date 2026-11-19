@@ -2,7 +2,8 @@ name: Bootstrap
 # Sobe o OS Service, na ordem: testes → RDS (DB/infra) → imagem no ECR → manifests.
 # Requer o Bootstrap do repo MANAGEMENT antes: ele cria a VPC, o EKS, o API Gateway (rota /os), as filas SQS
 # e a chave de acesso do OS Service no SSM, que este repo só usa.
-# Ordem entre os repos: MANAGEMENT → este e BILLING (em qualquer ordem, um não depende do outro) → LAMBDA.
+# Ordem entre os repos: MANAGEMENT → este → EXECUTION (este precisa consumir os eventos novos antes de o Execução e
+# Produção publicá-los), com o BILLING a qualquer momento depois da MANAGEMENT → LAMBDA.
 # Use na primeira criação, para recriar depois do Destroy ou para reaplicar a HEAD da main.
 
 on:

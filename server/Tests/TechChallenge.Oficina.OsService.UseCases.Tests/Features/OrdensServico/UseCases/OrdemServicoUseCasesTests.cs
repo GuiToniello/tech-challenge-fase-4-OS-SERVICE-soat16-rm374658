@@ -50,6 +50,17 @@ public sealed class OrdemServicoUseCasesTests
     private static OrdemServico CriarOrdemServico(DateTime? dataCadastro = null) =>
         OrdemServico.Criar(Guid.NewGuid(), Guid.NewGuid(), [Guid.NewGuid()], dataCadastro);
 
+    // Diagnostico e finalizacao vem dos eventos da Execucao e Producao; a execucao, do pagamento aprovado no Billing
+    private static OrdemServico CriarOrdemServicoFinalizada(DateTime dataFinalizacao)
+    {
+        var ordemServico = CriarOrdemServico(dataFinalizacao.AddMinutes(-40));
+        ordemServico.AlterarParaEmDiagnostico(dataFinalizacao.AddMinutes(-30));
+        ordemServico.RegistrarOrcamentoGerado(100m, dataFinalizacao.AddMinutes(-20));
+        ordemServico.RegistrarPagamentoAprovado(dataFinalizacao.AddMinutes(-10));
+        ordemServico.AlterarParaFinalizada(dataFinalizacao);
+        return ordemServico;
+    }
+
     private void ConfigurarOrdemExistente(OrdemServico ordemServico) =>
         _ordemServicoGatewayMock.Setup(g => g.ObterPorIdAsync(ordemServico.Id, It.IsAny<CancellationToken>())).ReturnsAsync(ordemServico);
 
@@ -271,7 +282,8 @@ public sealed class OrdemServicoUseCasesTests
         var useCases = CriarUseCases();
         var emExecucao = CriarOrdemServico();
         emExecucao.AlterarParaEmDiagnostico();
-        emExecucao.AlterarParaEmExecucao();
+        emExecucao.RegistrarOrcamentoGerado(100m);
+        emExecucao.RegistrarPagamentoAprovado();
         var recebida = CriarOrdemServico();
 
         _ordemServicoGatewayMock.Setup(g => g.ListarOrdenadasAsync(It.IsAny<CancellationToken>())).ReturnsAsync([emExecucao, recebida]);
@@ -369,135 +381,11 @@ public sealed class OrdemServicoUseCasesTests
     }
 
     [Fact]
-    public async Task AlterarStatusParaEmDiagnosticoAsync_DeveAlterarPersistirEPublicarStatusAlterado()
-    {
-        var useCases = CriarUseCases();
-        var ordemServico = CriarOrdemServico();
-        ConfigurarOrdemExistente(ordemServico);
-
-        var resultado = await useCases.AlterarStatusParaEmDiagnosticoAsync(new AlterarStatusOrdemServicoCommand { Id = ordemServico.Id });
-
-        Assert.Equal((int)StatusOrdemServico.EmDiagnostico, resultado.Status);
-        _ordemServicoGatewayMock.Verify(g => g.AtualizarAsync(ordemServico, It.IsAny<CancellationToken>()), Times.Once);
-        _eventosPublisherMock.Verify(p => p.PublicarAsync(
-            It.Is<OrdemServicoStatusAlterado>(evento =>
-                evento.OrdemServicoId == ordemServico.Id &&
-                evento.ClienteId == ordemServico.ClienteId &&
-                evento.StatusAnterior == 1 &&
-                evento.StatusNovo == 2),
-            ordemServico.Id,
-            It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task AlterarStatusParaEmDiagnosticoAsync_DeveLancarDomainExceptionSemGravarNemPublicar_QuandoTransicaoInvalida()
-    {
-        var useCases = CriarUseCases();
-        var ordemServico = CriarOrdemServico();
-        ordemServico.AlterarParaEmDiagnostico();
-        ConfigurarOrdemExistente(ordemServico);
-
-        var action = async () => await useCases.AlterarStatusParaEmDiagnosticoAsync(new AlterarStatusOrdemServicoCommand { Id = ordemServico.Id });
-
-        var exception = await Assert.ThrowsAsync<DomainException>(action);
-        Assert.Equal("Somente ordem de servico recebida pode ser alterada para em diagnostico.", exception.Message);
-        _ordemServicoGatewayMock.Verify(g => g.AtualizarAsync(It.IsAny<OrdemServico>(), It.IsAny<CancellationToken>()), Times.Never);
-        Assert.Empty(_eventosPublisherMock.Invocations);
-    }
-
-    [Fact]
-    public async Task AlterarStatusParaEmDiagnosticoAsync_DeveLancarKeyNotFoundException_QuandoOrdemNaoExiste()
-    {
-        var useCases = CriarUseCases();
-
-        var action = async () => await useCases.AlterarStatusParaEmDiagnosticoAsync(new AlterarStatusOrdemServicoCommand { Id = Guid.NewGuid() });
-
-        var exception = await Assert.ThrowsAsync<KeyNotFoundException>(action);
-        Assert.Equal("Ordem de servico nao encontrada.", exception.Message);
-    }
-
-    [Fact]
-    public async Task AlterarStatusParaEmDiagnosticoAsync_DeveRegistrarStatusAlteradoComTempoNoStatusAnterior()
-    {
-        var loggerMock = new Mock<ILogger<OrdemServicoUseCases>>();
-        var useCases = CriarUseCases(loggerMock.Object);
-        var ordemServico = CriarOrdemServico(DateTime.UtcNow.AddMinutes(-10));
-        ConfigurarOrdemExistente(ordemServico);
-
-        await useCases.AlterarStatusParaEmDiagnosticoAsync(new AlterarStatusOrdemServicoCommand { Id = ordemServico.Id });
-
-        var (nivel, propriedades) = ObterRegistroDeLog(loggerMock, OrdemServicoLogEventos.OsStatusAlterado);
-        Assert.Equal(LogLevel.Information, nivel);
-        Assert.Equal(ordemServico.Id, propriedades["OrdemServicoId"]);
-        Assert.Equal("recebida", propriedades["StatusAnterior"]);
-        Assert.Equal("em_diagnostico", propriedades["StatusNovo"]);
-        Assert.Equal("diagnostico", propriedades["Etapa"]);
-        Assert.InRange((double)propriedades["TempoNoStatusAnteriorSegundos"]!, 600d, 660d);
-    }
-
-    [Fact]
-    public async Task AlterarStatusParaEmExecucaoAsync_DeveAlterarPersistirEPublicarStatusAlterado()
-    {
-        var useCases = CriarUseCases();
-        var ordemServico = CriarOrdemServico();
-        ordemServico.AlterarParaEmDiagnostico();
-        ConfigurarOrdemExistente(ordemServico);
-
-        var resultado = await useCases.AlterarStatusParaEmExecucaoAsync(new AlterarStatusOrdemServicoCommand { Id = ordemServico.Id });
-
-        Assert.Equal((int)StatusOrdemServico.EmExecucao, resultado.Status);
-        _ordemServicoGatewayMock.Verify(g => g.AtualizarAsync(ordemServico, It.IsAny<CancellationToken>()), Times.Once);
-        _eventosPublisherMock.Verify(p => p.PublicarAsync(
-            It.Is<OrdemServicoStatusAlterado>(evento => evento.StatusAnterior == 2 && evento.StatusNovo == 4),
-            ordemServico.Id,
-            It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task AlterarStatusParaEmExecucaoAsync_DeveLancarDomainExceptionSemGravarNemPublicar_QuandoAguardandoAprovacao()
-    {
-        // Com orcamento gerado, a execucao so comeca pelo PagamentoAprovado do Billing: a rota manual nao pula o pagamento
-        var useCases = CriarUseCases();
-        var ordemServico = CriarOrdemServico();
-        ordemServico.RegistrarOrcamentoGerado(150m);
-        ConfigurarOrdemExistente(ordemServico);
-
-        var action = async () => await useCases.AlterarStatusParaEmExecucaoAsync(new AlterarStatusOrdemServicoCommand { Id = ordemServico.Id });
-
-        var exception = await Assert.ThrowsAsync<DomainException>(action);
-        Assert.Equal("Somente ordem de servico em diagnostico pode ser alterada para em execucao.", exception.Message);
-        Assert.Equal(StatusOrdemServico.AguardandoAprovacao, ordemServico.Status);
-        _ordemServicoGatewayMock.Verify(g => g.AtualizarAsync(It.IsAny<OrdemServico>(), It.IsAny<CancellationToken>()), Times.Never);
-        Assert.Empty(_eventosPublisherMock.Invocations);
-    }
-
-    [Fact]
-    public async Task AlterarStatusParaFinalizadaAsync_DeveAlterarPersistirEPublicarStatusAlterado()
-    {
-        var useCases = CriarUseCases();
-        var ordemServico = CriarOrdemServico();
-        ordemServico.AlterarParaEmDiagnostico();
-        ordemServico.AlterarParaEmExecucao();
-        ConfigurarOrdemExistente(ordemServico);
-
-        var resultado = await useCases.AlterarStatusParaFinalizadaAsync(new AlterarStatusOrdemServicoCommand { Id = ordemServico.Id });
-
-        Assert.Equal((int)StatusOrdemServico.Finalizada, resultado.Status);
-        _eventosPublisherMock.Verify(p => p.PublicarAsync(
-            It.Is<OrdemServicoStatusAlterado>(evento => evento.StatusAnterior == 4 && evento.StatusNovo == 5),
-            ordemServico.Id,
-            It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
     public async Task AlterarStatusParaEntregueAsync_DeveAlterarPublicarEAtualizarIndicadores()
     {
         var loggerMock = new Mock<ILogger<OrdemServicoUseCases>>();
         var useCases = CriarUseCases(loggerMock.Object);
-        var ordemServico = CriarOrdemServico();
-        ordemServico.AlterarParaEmDiagnostico();
-        ordemServico.AlterarParaEmExecucao();
-        ordemServico.AlterarParaFinalizada();
+        var ordemServico = CriarOrdemServicoFinalizada(DateTime.UtcNow);
         ConfigurarOrdemExistente(ordemServico);
 
         var resultado = await useCases.AlterarStatusParaEntregueAsync(new AlterarStatusOrdemServicoCommand { Id = ordemServico.Id });
@@ -530,17 +418,47 @@ public sealed class OrdemServicoUseCasesTests
     }
 
     [Fact]
+    public async Task AlterarStatusParaEntregueAsync_DeveLancarKeyNotFoundException_QuandoOrdemNaoExiste()
+    {
+        var useCases = CriarUseCases();
+
+        var action = async () => await useCases.AlterarStatusParaEntregueAsync(new AlterarStatusOrdemServicoCommand { Id = Guid.NewGuid() });
+
+        var exception = await Assert.ThrowsAsync<KeyNotFoundException>(action);
+        Assert.Equal("Ordem de servico nao encontrada.", exception.Message);
+    }
+
+    [Fact]
+    public async Task AlterarStatusParaEntregueAsync_DeveRegistrarStatusAlteradoComTempoNoStatusAnterior()
+    {
+        var loggerMock = new Mock<ILogger<OrdemServicoUseCases>>();
+        var useCases = CriarUseCases(loggerMock.Object);
+        var ordemServico = CriarOrdemServicoFinalizada(DateTime.UtcNow.AddMinutes(-10));
+        ConfigurarOrdemExistente(ordemServico);
+
+        await useCases.AlterarStatusParaEntregueAsync(new AlterarStatusOrdemServicoCommand { Id = ordemServico.Id });
+
+        var (nivel, propriedades) = ObterRegistroDeLog(loggerMock, OrdemServicoLogEventos.OsStatusAlterado);
+        Assert.Equal(LogLevel.Information, nivel);
+        Assert.Equal(ordemServico.Id, propriedades["OrdemServicoId"]);
+        Assert.Equal("finalizada", propriedades["StatusAnterior"]);
+        Assert.Equal("entregue", propriedades["StatusNovo"]);
+        Assert.Equal("entrega", propriedades["Etapa"]);
+        Assert.InRange((double)propriedades["TempoNoStatusAnteriorSegundos"]!, 600d, 660d);
+    }
+
+    [Fact]
     public async Task AlterarStatus_DevePropagarFalhaDePublicacao_DepoisDeGravar()
     {
         var useCases = CriarUseCases();
-        var ordemServico = CriarOrdemServico();
+        var ordemServico = CriarOrdemServicoFinalizada(DateTime.UtcNow);
         ConfigurarOrdemExistente(ordemServico);
 
         _eventosPublisherMock
             .Setup(p => p.PublicarAsync(It.IsAny<OrdemServicoStatusAlterado>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("SQS indisponivel"));
 
-        var action = async () => await useCases.AlterarStatusParaEmDiagnosticoAsync(new AlterarStatusOrdemServicoCommand { Id = ordemServico.Id });
+        var action = async () => await useCases.AlterarStatusParaEntregueAsync(new AlterarStatusOrdemServicoCommand { Id = ordemServico.Id });
 
         await Assert.ThrowsAsync<InvalidOperationException>(action);
         _ordemServicoGatewayMock.Verify(g => g.AtualizarAsync(ordemServico, It.IsAny<CancellationToken>()), Times.Once);

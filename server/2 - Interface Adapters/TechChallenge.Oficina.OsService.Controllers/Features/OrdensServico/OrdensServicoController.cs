@@ -141,21 +141,6 @@ namespace TechChallenge.Oficina.OsService.Controllers.Features.OrdensServico
             }
         }
 
-        public Task<object> AlterarParaEmDiagnostico(Guid id, CancellationToken cancellationToken)
-        {
-            return AlterarStatusAsync(id, OrdemServicoLogEventos.Etapas.Diagnostico, _ordemServicoUseCases.AlterarStatusParaEmDiagnosticoAsync, cancellationToken);
-        }
-
-        public Task<object> AlterarParaEmExecucao(Guid id, CancellationToken cancellationToken)
-        {
-            return AlterarStatusAsync(id, OrdemServicoLogEventos.Etapas.Execucao, _ordemServicoUseCases.AlterarStatusParaEmExecucaoAsync, cancellationToken);
-        }
-
-        public Task<object> AlterarParaFinalizada(Guid id, CancellationToken cancellationToken)
-        {
-            return AlterarStatusAsync(id, OrdemServicoLogEventos.Etapas.Finalizacao, _ordemServicoUseCases.AlterarStatusParaFinalizadaAsync, cancellationToken);
-        }
-
         public Task<object> AlterarParaEntregue(Guid id, CancellationToken cancellationToken)
         {
             return AlterarStatusAsync(id, OrdemServicoLogEventos.Etapas.Entrega, _ordemServicoUseCases.AlterarStatusParaEntregueAsync, cancellationToken);

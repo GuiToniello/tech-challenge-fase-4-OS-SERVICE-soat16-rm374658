@@ -43,7 +43,8 @@ public sealed class IndicadorUseCasesTests
     {
         var executada = OrdemServico.Criar(Guid.NewGuid(), Guid.NewGuid(), [Guid.NewGuid()], Hora(8));
         executada.AlterarParaEmDiagnostico(Hora(9));
-        executada.AlterarParaEmExecucao(Hora(10));
+        executada.RegistrarOrcamentoGerado(80m, Hora(10));
+        executada.RegistrarPagamentoAprovado(Hora(10));
         executada.AlterarParaFinalizada(Hora(12));
         executada.AlterarParaEntregue(Hora(13));
 

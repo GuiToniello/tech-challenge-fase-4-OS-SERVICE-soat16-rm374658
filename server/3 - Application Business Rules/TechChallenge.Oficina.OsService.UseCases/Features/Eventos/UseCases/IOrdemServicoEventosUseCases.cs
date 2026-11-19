@@ -8,4 +8,6 @@ public interface IOrdemServicoEventosUseCases
     Task<ResultadoProcessamentoEvento> ProcessarOrcamentoGeradoAsync(OrcamentoGerado evento, CancellationToken cancellationToken = default);
     Task<ResultadoProcessamentoEvento> ProcessarPagamentoAprovadoAsync(PagamentoAprovado evento, CancellationToken cancellationToken = default);
     Task<ResultadoProcessamentoEvento> ProcessarOrcamentoRecusadoAsync(OrcamentoRecusado evento, CancellationToken cancellationToken = default);
+    Task<ResultadoProcessamentoEvento> ProcessarDiagnosticoIniciadoAsync(DiagnosticoIniciado evento, CancellationToken cancellationToken = default);
+    Task<ResultadoProcessamentoEvento> ProcessarExecucaoFinalizadaAsync(ExecucaoFinalizada evento, CancellationToken cancellationToken = default);
 }

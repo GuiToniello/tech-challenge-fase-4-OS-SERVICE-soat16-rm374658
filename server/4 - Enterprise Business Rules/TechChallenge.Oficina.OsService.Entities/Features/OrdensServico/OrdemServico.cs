@@ -60,6 +60,7 @@ public class OrdemServico
 
     public void AlterarParaEmDiagnostico(DateTime? dataAlteracao = null)
     {
+        // Diagnóstico iniciado na Execução e Produção (evento DiagnosticoIniciado)
         if (Status != StatusOrdemServico.Recebida)
         {
             throw new DomainException("Somente ordem de servico recebida pode ser alterada para em diagnostico.");
@@ -68,19 +69,9 @@ public class OrdemServico
         DefinirStatus(StatusOrdemServico.EmDiagnostico, dataAlteracao ?? DateTime.UtcNow);
     }
 
-    public void AlterarParaEmExecucao(DateTime? dataAlteracao = null)
-    {
-        // Com orçamento (aguardando aprovação) a execução só começa pelo evento PagamentoAprovado do Billing: o pagamento não pode ser pulado
-        if (Status != StatusOrdemServico.EmDiagnostico)
-        {
-            throw new DomainException("Somente ordem de servico em diagnostico pode ser alterada para em execucao.");
-        }
-
-        DefinirStatus(StatusOrdemServico.EmExecucao, dataAlteracao ?? DateTime.UtcNow);
-    }
-
     public void AlterarParaFinalizada(DateTime? dataAlteracao = null)
     {
+        // Execução finalizada na Execução e Produção (evento ExecucaoFinalizada)
         if (Status != StatusOrdemServico.EmExecucao)
         {
             throw new DomainException("Somente ordem de servico em execucao pode ser alterada para finalizada.");
@@ -122,7 +113,7 @@ public class OrdemServico
 
     public void RegistrarPagamentoAprovado(DateTime? dataAprovacao = null)
     {
-        // Orçamento aprovado e pago no Billing: só então a OS entra em execução
+        // Orçamento aprovado e pago no Billing: é o único caminho para a OS entrar em execução (o pagamento não pode ser pulado)
         if (Status != StatusOrdemServico.AguardandoAprovacao)
         {
             throw new DomainException("Somente ordem de servico aguardando aprovacao pode ter o pagamento aprovado.");

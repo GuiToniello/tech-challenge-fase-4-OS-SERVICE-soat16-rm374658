@@ -31,12 +31,14 @@ public sealed class OrdemServicoDomainTests
                 break;
             case StatusOrdemServico.Finalizada:
                 ordemServico.AlterarParaEmDiagnostico();
-                ordemServico.AlterarParaEmExecucao();
+                ordemServico.RegistrarOrcamentoGerado(100m);
+                ordemServico.RegistrarPagamentoAprovado();
                 ordemServico.AlterarParaFinalizada();
                 break;
             case StatusOrdemServico.Entregue:
                 ordemServico.AlterarParaEmDiagnostico();
-                ordemServico.AlterarParaEmExecucao();
+                ordemServico.RegistrarOrcamentoGerado(100m);
+                ordemServico.RegistrarPagamentoAprovado();
                 ordemServico.AlterarParaFinalizada();
                 ordemServico.AlterarParaEntregue();
                 break;
@@ -137,11 +139,12 @@ public sealed class OrdemServicoDomainTests
         var ordemServico = CriarOrdem(new DateTime(2024, 01, 01, 8, 00, 00, DateTimeKind.Utc));
 
         ordemServico.AlterarParaEmDiagnostico(new DateTime(2024, 01, 01, 9, 00, 00, DateTimeKind.Utc));
-        ordemServico.AlterarParaEmExecucao(new DateTime(2024, 01, 01, 10, 00, 00, DateTimeKind.Utc));
+        ordemServico.RegistrarOrcamentoGerado(100m, new DateTime(2024, 01, 01, 10, 00, 00, DateTimeKind.Utc));
+        ordemServico.RegistrarPagamentoAprovado(new DateTime(2024, 01, 01, 10, 00, 00, DateTimeKind.Utc));
         ordemServico.AlterarParaFinalizada(new DateTime(2024, 01, 01, 12, 00, 00, DateTimeKind.Utc));
         ordemServico.AlterarParaEntregue(new DateTime(2024, 01, 01, 14, 00, 00, DateTimeKind.Utc));
 
-        Assert.Equal(5, ordemServico.HistoricoStatus.Count);
+        Assert.Equal(6, ordemServico.HistoricoStatus.Count);
         Assert.Equal(StatusOrdemServico.Entregue, ordemServico.Status);
     }
 
@@ -150,7 +153,8 @@ public sealed class OrdemServicoDomainTests
     {
         var ordemServico = CriarOrdem(new DateTime(2024, 01, 01, 8, 00, 00, DateTimeKind.Utc));
         ordemServico.AlterarParaEmDiagnostico(new DateTime(2024, 01, 01, 9, 00, 00, DateTimeKind.Utc));
-        ordemServico.AlterarParaEmExecucao(new DateTime(2024, 01, 01, 10, 00, 00, DateTimeKind.Utc));
+        ordemServico.RegistrarOrcamentoGerado(100m, new DateTime(2024, 01, 01, 10, 00, 00, DateTimeKind.Utc));
+        ordemServico.RegistrarPagamentoAprovado(new DateTime(2024, 01, 01, 10, 00, 00, DateTimeKind.Utc));
         ordemServico.AlterarParaFinalizada(new DateTime(2024, 01, 01, 13, 00, 00, DateTimeKind.Utc));
         ordemServico.AlterarParaEntregue(new DateTime(2024, 01, 01, 14, 00, 00, DateTimeKind.Utc));
 
@@ -227,36 +231,6 @@ public sealed class OrdemServicoDomainTests
 
         var exception = Assert.Throws<DomainException>(action);
         Assert.Equal("Somente ordem de servico recebida pode ser alterada para em diagnostico.", exception.Message);
-    }
-
-    [Fact]
-    public void AlterarParaEmExecucao_DeveAlterarStatus_QuandoStatusForEmDiagnostico()
-    {
-        var ordemServico = CriarOrdemNoStatus(StatusOrdemServico.EmDiagnostico);
-
-        ordemServico.AlterarParaEmExecucao();
-
-        Assert.Equal(StatusOrdemServico.EmExecucao, ordemServico.Status);
-    }
-
-    // Aguardando aprovacao: a execucao so comeca com o pagamento aprovado (evento do Billing), nunca pela rota manual
-    [Theory]
-    [InlineData(StatusOrdemServico.Recebida)]
-    [InlineData(StatusOrdemServico.AguardandoAprovacao)]
-    [InlineData(StatusOrdemServico.EmExecucao)]
-    [InlineData(StatusOrdemServico.Finalizada)]
-    [InlineData(StatusOrdemServico.Cancelada)]
-    public void AlterarParaEmExecucao_DeveLancar_QuandoStatusNaoForEmDiagnostico(StatusOrdemServico statusAtual)
-    {
-        var ordemServico = CriarOrdemNoStatus(statusAtual);
-        var quantidadeHistorico = ordemServico.HistoricoStatus.Count;
-
-        var action = () => ordemServico.AlterarParaEmExecucao();
-
-        var exception = Assert.Throws<DomainException>(action);
-        Assert.Equal("Somente ordem de servico em diagnostico pode ser alterada para em execucao.", exception.Message);
-        Assert.Equal(statusAtual, ordemServico.Status);
-        Assert.Equal(quantidadeHistorico, ordemServico.HistoricoStatus.Count);
     }
 
     [Fact]

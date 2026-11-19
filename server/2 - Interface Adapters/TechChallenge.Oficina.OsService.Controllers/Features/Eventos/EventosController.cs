@@ -27,6 +27,8 @@ namespace TechChallenge.Oficina.OsService.Controllers.Features.Eventos
                 nameof(OrcamentoGerado) => await _ordemServicoEventosUseCases.ProcessarOrcamentoGeradoAsync(Desserializar<OrcamentoGerado>(dadosJson), cancellationToken),
                 nameof(PagamentoAprovado) => await _ordemServicoEventosUseCases.ProcessarPagamentoAprovadoAsync(Desserializar<PagamentoAprovado>(dadosJson), cancellationToken),
                 nameof(OrcamentoRecusado) => await _ordemServicoEventosUseCases.ProcessarOrcamentoRecusadoAsync(Desserializar<OrcamentoRecusado>(dadosJson), cancellationToken),
+                nameof(DiagnosticoIniciado) => await _ordemServicoEventosUseCases.ProcessarDiagnosticoIniciadoAsync(Desserializar<DiagnosticoIniciado>(dadosJson), cancellationToken),
+                nameof(ExecucaoFinalizada) => await _ordemServicoEventosUseCases.ProcessarExecucaoFinalizadaAsync(Desserializar<ExecucaoFinalizada>(dadosJson), cancellationToken),
                 _ => ResultadoProcessamentoEvento.Ignorado
             };
         }

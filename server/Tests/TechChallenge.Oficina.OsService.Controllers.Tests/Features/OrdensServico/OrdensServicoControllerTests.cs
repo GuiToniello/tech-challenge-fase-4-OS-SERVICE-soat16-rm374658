@@ -254,53 +254,38 @@ public sealed class OrdensServicoControllerTests
     }
 
     [Fact]
-    public async Task AlterarParaEmDiagnostico_DeveRepassarComandoComId()
+    public async Task AlterarParaEntregue_DeveRepassarComandoComId()
     {
         var controller = CriarController();
         var id = Guid.NewGuid();
-        _useCasesMock.Setup(useCases => useCases.AlterarStatusParaEmDiagnosticoAsync(It.Is<AlterarStatusOrdemServicoCommand>(c => c.Id == id), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new OrdemServicoViewModel { Id = id, Status = 2 });
+        _useCasesMock.Setup(useCases => useCases.AlterarStatusParaEntregueAsync(It.Is<AlterarStatusOrdemServicoCommand>(c => c.Id == id), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new OrdemServicoViewModel { Id = id, Status = 6 });
         ConfigurarAdapterParaOrdem();
 
-        var resultado = await controller.AlterarParaEmDiagnostico(id, CancellationToken.None);
+        var resultado = await controller.AlterarParaEntregue(id, CancellationToken.None);
 
         Assert.Same(_resultadoAdaptado, resultado);
-        _useCasesMock.Verify(useCases => useCases.AlterarStatusParaEmDiagnosticoAsync(It.Is<AlterarStatusOrdemServicoCommand>(c => c.Id == id), It.IsAny<CancellationToken>()), Times.Once);
+        _useCasesMock.Verify(useCases => useCases.AlterarStatusParaEntregueAsync(It.Is<AlterarStatusOrdemServicoCommand>(c => c.Id == id), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task AlterarParaEmExecucao_DeveRegistrarFalhaDeRegraDeNegocio_QuandoTransicaoInvalida()
+    public async Task AlterarParaEntregue_DeveRegistrarFalhaDeRegraDeNegocio_QuandoTransicaoInvalida()
     {
         var loggerMock = new Mock<ILogger<OrdensServicoController>>();
         var controller = CriarController(loggerMock.Object);
         var id = Guid.NewGuid();
-        _useCasesMock.Setup(useCases => useCases.AlterarStatusParaEmExecucaoAsync(It.Is<AlterarStatusOrdemServicoCommand>(c => c.Id == id), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new DomainException("Somente ordem de servico em diagnostico pode ser alterada para em execucao."));
+        _useCasesMock.Setup(useCases => useCases.AlterarStatusParaEntregueAsync(It.Is<AlterarStatusOrdemServicoCommand>(c => c.Id == id), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new DomainException("Somente ordem de servico finalizada pode ser alterada para entregue."));
         ConfigurarAdapterParaOrdem();
 
-        await controller.AlterarParaEmExecucao(id, CancellationToken.None);
+        await controller.AlterarParaEntregue(id, CancellationToken.None);
 
         var (nivel, propriedades) = ObterRegistroDeFalha(loggerMock);
         Assert.Equal(LogLevel.Warning, nivel);
-        Assert.Equal("execucao", propriedades["Etapa"]);
+        Assert.Equal("entrega", propriedades["Etapa"]);
         Assert.Equal(id, propriedades["OrdemServicoId"]);
         Assert.Equal("regra_negocio", propriedades["TipoFalha"]);
         _adapterMock.Verify(adapter => adapter.Adapt(It.Is<OrdensServicoResult<OrdemServicoViewModel, Exception>>(r => r.Error is DomainException), false), Times.Once);
-    }
-
-    [Fact]
-    public async Task AlterarParaFinalizada_DeveRepassarComandoComId()
-    {
-        var controller = CriarController();
-        var id = Guid.NewGuid();
-        _useCasesMock.Setup(useCases => useCases.AlterarStatusParaFinalizadaAsync(It.Is<AlterarStatusOrdemServicoCommand>(c => c.Id == id), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new OrdemServicoViewModel { Id = id, Status = 5 });
-        ConfigurarAdapterParaOrdem();
-
-        var resultado = await controller.AlterarParaFinalizada(id, CancellationToken.None);
-
-        Assert.Same(_resultadoAdaptado, resultado);
-        _useCasesMock.Verify(useCases => useCases.AlterarStatusParaFinalizadaAsync(It.Is<AlterarStatusOrdemServicoCommand>(c => c.Id == id), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -325,10 +310,10 @@ public sealed class OrdensServicoControllerTests
     public async Task AlterarStatus_DevePropagarExcecaoNaoTratada_ParaOMiddleware()
     {
         var controller = CriarController();
-        _useCasesMock.Setup(useCases => useCases.AlterarStatusParaEmDiagnosticoAsync(It.IsAny<AlterarStatusOrdemServicoCommand>(), It.IsAny<CancellationToken>()))
+        _useCasesMock.Setup(useCases => useCases.AlterarStatusParaEntregueAsync(It.IsAny<AlterarStatusOrdemServicoCommand>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("SQS indisponivel"));
 
-        var action = async () => await controller.AlterarParaEmDiagnostico(Guid.NewGuid(), CancellationToken.None);
+        var action = async () => await controller.AlterarParaEntregue(Guid.NewGuid(), CancellationToken.None);
 
         await Assert.ThrowsAsync<InvalidOperationException>(action);
     }

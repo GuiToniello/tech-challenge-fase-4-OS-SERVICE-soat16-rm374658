@@ -8,7 +8,7 @@ using TechChallenge.Oficina.OsService.UseCases.Features.OrdensServico.Logging;
 
 namespace TechChallenge.Oficina.OsService.Messaging.Features.Eventos;
 
-// Fan-out: o envelope e montado uma vez e o mesmo (mesmo id) vai para cada fila de FilasPublicacao (Management e Billing).
+// Fan-out: o envelope e montado uma vez e o mesmo (mesmo id) vai para cada fila de FilasPublicacao (Management, Billing e Execucao).
 public sealed class EventosPublisher : IEventosPublisher
 {
     public const string Origem = "os-service";

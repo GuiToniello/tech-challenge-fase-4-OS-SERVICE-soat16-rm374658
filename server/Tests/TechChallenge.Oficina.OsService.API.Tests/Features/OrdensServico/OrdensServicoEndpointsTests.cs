@@ -111,24 +111,16 @@ public sealed class OrdensServicoEndpointsTests
         _ordemServicoUseCasesMock.Verify(s => s.ExcluirAsync(It.Is<ExcluirOrdemServicoCommand>(c => c.Id == id), It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // Diagnostico e finalizacao chegam por evento da Execucao e Producao: pelo HTTP so resta a entrega
     [Fact]
-    public async Task MapOrdensServicoEndpoints_AlteracoesDeStatus_DevemInvocarOUseCaseDeCadaRota()
+    public async Task MapOrdensServicoEndpoints_Entregar_DeveInvocarUseCaseComIdCorreto()
     {
         var id = Guid.NewGuid();
-        var controller = CriarController();
-        _ordemServicoUseCasesMock.Setup(s => s.AlterarStatusParaEmDiagnosticoAsync(It.IsAny<AlterarStatusOrdemServicoCommand>(), It.IsAny<CancellationToken>())).ReturnsAsync(new OrdemServicoViewModel { Id = id, Status = 2 });
-        _ordemServicoUseCasesMock.Setup(s => s.AlterarStatusParaEmExecucaoAsync(It.IsAny<AlterarStatusOrdemServicoCommand>(), It.IsAny<CancellationToken>())).ReturnsAsync(new OrdemServicoViewModel { Id = id, Status = 4 });
-        _ordemServicoUseCasesMock.Setup(s => s.AlterarStatusParaFinalizadaAsync(It.IsAny<AlterarStatusOrdemServicoCommand>(), It.IsAny<CancellationToken>())).ReturnsAsync(new OrdemServicoViewModel { Id = id, Status = 5 });
         _ordemServicoUseCasesMock.Setup(s => s.AlterarStatusParaEntregueAsync(It.IsAny<AlterarStatusOrdemServicoCommand>(), It.IsAny<CancellationToken>())).ReturnsAsync(new OrdemServicoViewModel { Id = id, Status = 6 });
 
-        Assert.Equal(2, Assert.IsType<Ok<OrdemServicoViewModel>>(await controller.AlterarParaEmDiagnostico(id, CancellationToken.None)).Value!.Status);
-        Assert.Equal(4, Assert.IsType<Ok<OrdemServicoViewModel>>(await controller.AlterarParaEmExecucao(id, CancellationToken.None)).Value!.Status);
-        Assert.Equal(5, Assert.IsType<Ok<OrdemServicoViewModel>>(await controller.AlterarParaFinalizada(id, CancellationToken.None)).Value!.Status);
-        Assert.Equal(6, Assert.IsType<Ok<OrdemServicoViewModel>>(await controller.AlterarParaEntregue(id, CancellationToken.None)).Value!.Status);
+        var resultado = await CriarController().AlterarParaEntregue(id, CancellationToken.None);
 
-        _ordemServicoUseCasesMock.Verify(s => s.AlterarStatusParaEmDiagnosticoAsync(It.Is<AlterarStatusOrdemServicoCommand>(c => c.Id == id), It.IsAny<CancellationToken>()), Times.Once);
-        _ordemServicoUseCasesMock.Verify(s => s.AlterarStatusParaEmExecucaoAsync(It.Is<AlterarStatusOrdemServicoCommand>(c => c.Id == id), It.IsAny<CancellationToken>()), Times.Once);
-        _ordemServicoUseCasesMock.Verify(s => s.AlterarStatusParaFinalizadaAsync(It.Is<AlterarStatusOrdemServicoCommand>(c => c.Id == id), It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal(6, Assert.IsType<Ok<OrdemServicoViewModel>>(resultado).Value!.Status);
         _ordemServicoUseCasesMock.Verify(s => s.AlterarStatusParaEntregueAsync(It.Is<AlterarStatusOrdemServicoCommand>(c => c.Id == id), It.IsAny<CancellationToken>()), Times.Once);
     }
 }

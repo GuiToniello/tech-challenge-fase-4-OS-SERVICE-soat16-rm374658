@@ -24,7 +24,6 @@ public static class OrdemServicoLogEventos
         public const string OrcamentoGeracao = "orcamento_geracao";
         public const string OrcamentoAprovacao = "orcamento_aprovacao";
         public const string OrcamentoRecusa = "orcamento_recusa";
-        public const string Execucao = "execucao";
         public const string Finalizacao = "finalizacao";
         public const string Entrega = "entrega";
         public const string Cancelamento = "cancelamento";

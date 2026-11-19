@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http.HttpResults;
 using Moq;
 using TechChallenge.Oficina.OsService.Entities.Features.OrdensServico.Enums;
 using TechChallenge.Oficina.OsService.Integration.Tests.Infrastructure;
+using TechChallenge.Oficina.OsService.UseCases.Features.Eventos;
 using TechChallenge.Oficina.OsService.UseCases.Features.Eventos.Contratos;
 using TechChallenge.Oficina.OsService.UseCases.Features.OrdensServico.Commands;
 using TechChallenge.Oficina.OsService.UseCases.Features.OrdensServico.ViewModels;
@@ -21,6 +22,25 @@ public sealed class OrdensServicoControllerIntegrationTests : IDisposable
         var created = Assert.IsType<CreatedAtRoute<OrdemServicoViewModel>>(await _fixture.CriarOrdensServicoEndpoints().Post(command, CancellationToken.None));
         return created.Value!;
     }
+
+    // Diagnostico e finalizacao chegam por evento da Execucao e Producao; orcamento e pagamento, por evento do Billing (JSON como chegam da fila)
+    private async Task ProcessarEventoAsync(string tipo, string dadosJson)
+    {
+        var resultado = await _fixture.CriarEventosController().ProcessarAsync(tipo, dadosJson, CancellationToken.None);
+        Assert.Equal(ResultadoProcessamentoEvento.Processado, resultado);
+    }
+
+    private Task IniciarDiagnosticoAsync(Guid ordemId) =>
+        ProcessarEventoAsync("DiagnosticoIniciado", $$"""{"ordemServicoId":"{{ordemId}}"}""");
+
+    private async Task AprovarOrcamentoEPagamentoAsync(Guid ordemId)
+    {
+        await ProcessarEventoAsync("OrcamentoGerado", $$"""{"ordemServicoId":"{{ordemId}}","valorTotal":100}""");
+        await ProcessarEventoAsync("PagamentoAprovado", $$"""{"ordemServicoId":"{{ordemId}}","pagamentoId":"{{Guid.NewGuid()}}","valor":100}""");
+    }
+
+    private Task FinalizarExecucaoAsync(Guid ordemId) =>
+        ProcessarEventoAsync("ExecucaoFinalizada", $$"""{"ordemServicoId":"{{ordemId}}"}""");
 
     [Fact]
     public async Task Post_OrdemServicoValida_DeveRetornar201EPublicarOrdemServicoAberta()
@@ -146,7 +166,7 @@ public sealed class OrdensServicoControllerIntegrationTests : IDisposable
     public async Task Put_AposMudancaDeStatus_DeveRetornar400SemAlterarAOrdem()
     {
         var ordem = await CriarOrdemAsync();
-        Assert.IsType<Ok<OrdemServicoViewModel>>(await _fixture.CriarOrdensServicoEndpoints().AlterarParaEmDiagnostico(ordem.Id, CancellationToken.None));
+        await IniciarDiagnosticoAsync(ordem.Id);
         var command = new AtualizarOrdemServicoCommand { Id = ordem.Id, ClienteId = ordem.ClienteId, VeiculoId = Guid.NewGuid(), ServicoIds = [Guid.NewGuid()] };
 
         var badRequest = Assert.IsType<BadRequest<Dictionary<string, string?>>>(await _fixture.CriarOrdensServicoEndpoints().Put(command, CancellationToken.None));
@@ -169,34 +189,44 @@ public sealed class OrdensServicoControllerIntegrationTests : IDisposable
     {
         var ordem = await CriarOrdemAsync();
 
-        Assert.Equal(2, Assert.IsType<Ok<OrdemServicoViewModel>>(await _fixture.CriarOrdensServicoEndpoints().AlterarParaEmDiagnostico(ordem.Id, CancellationToken.None)).Value!.Status);
-        Assert.Equal(4, Assert.IsType<Ok<OrdemServicoViewModel>>(await _fixture.CriarOrdensServicoEndpoints().AlterarParaEmExecucao(ordem.Id, CancellationToken.None)).Value!.Status);
-        Assert.Equal(5, Assert.IsType<Ok<OrdemServicoViewModel>>(await _fixture.CriarOrdensServicoEndpoints().AlterarParaFinalizada(ordem.Id, CancellationToken.None)).Value!.Status);
+        await IniciarDiagnosticoAsync(ordem.Id);
+        await AprovarOrcamentoEPagamentoAsync(ordem.Id);
+        await FinalizarExecucaoAsync(ordem.Id);
         Assert.Equal(6, Assert.IsType<Ok<OrdemServicoViewModel>>(await _fixture.CriarOrdensServicoEndpoints().AlterarParaEntregue(ordem.Id, CancellationToken.None)).Value!.Status);
 
-        _fixture.EventosPublisherMock.Verify(p => p.PublicarAsync(It.IsAny<OrdemServicoStatusAlterado>(), ordem.Id, It.IsAny<CancellationToken>()), Times.Exactly(4));
-        _fixture.EventosPublisherMock.Verify(p => p.PublicarAsync(
-            It.Is<OrdemServicoStatusAlterado>(evento => evento.StatusAnterior == 5 && evento.StatusNovo == 6),
-            ordem.Id,
-            It.IsAny<CancellationToken>()), Times.Once);
+        var acompanhamento = Assert.IsType<Ok<AcompanhamentoOrdemServicoViewModel>>(await _fixture.CriarOrdensServicoEndpoints().GetAcompanhamento(ordem.Id, CancellationToken.None));
+        Assert.Equal(
+            [StatusOrdemServico.Recebida, StatusOrdemServico.EmDiagnostico, StatusOrdemServico.AguardandoAprovacao, StatusOrdemServico.EmExecucao, StatusOrdemServico.Finalizada, StatusOrdemServico.Entregue],
+            acompanhamento.Value!.HistoricoStatus.Select(historico => historico.Status));
+
+        // Uma publicacao por mudanca: diagnostico e finalizacao (Execucao e Producao), orcamento e pagamento (Billing) e entrega (HTTP)
+        _fixture.EventosPublisherMock.Verify(p => p.PublicarAsync(It.IsAny<OrdemServicoStatusAlterado>(), ordem.Id, It.IsAny<CancellationToken>()), Times.Exactly(5));
+        foreach (var (statusAnterior, statusNovo) in new[] { (1, 2), (2, 3), (3, 4), (4, 5), (5, 6) })
+        {
+            _fixture.EventosPublisherMock.Verify(p => p.PublicarAsync(
+                It.Is<OrdemServicoStatusAlterado>(evento => evento.StatusAnterior == statusAnterior && evento.StatusNovo == statusNovo),
+                ordem.Id,
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
     }
 
     [Fact]
-    public async Task AlterarParaEmDiagnostico_AposEntregue_DeveRetornar400()
+    public async Task AlterarParaEntregue_OrdemNaoFinalizada_DeveRetornar400SemAlterarAOrdem()
     {
         var ordem = await CriarOrdemAsync();
-        await _fixture.CriarOrdensServicoEndpoints().AlterarParaEmDiagnostico(ordem.Id, CancellationToken.None);
-        await _fixture.CriarOrdensServicoEndpoints().AlterarParaEmExecucao(ordem.Id, CancellationToken.None);
-        await _fixture.CriarOrdensServicoEndpoints().AlterarParaFinalizada(ordem.Id, CancellationToken.None);
-        await _fixture.CriarOrdensServicoEndpoints().AlterarParaEntregue(ordem.Id, CancellationToken.None);
+        await IniciarDiagnosticoAsync(ordem.Id);
 
-        Assert.IsType<BadRequest<Dictionary<string, string?>>>(await _fixture.CriarOrdensServicoEndpoints().AlterarParaEmDiagnostico(ordem.Id, CancellationToken.None));
+        var badRequest = Assert.IsType<BadRequest<Dictionary<string, string?>>>(await _fixture.CriarOrdensServicoEndpoints().AlterarParaEntregue(ordem.Id, CancellationToken.None));
+
+        Assert.Equal("Somente ordem de servico finalizada pode ser alterada para entregue.", badRequest.Value!["message"]);
+        var atual = Assert.IsType<Ok<OrdemServicoViewModel>>(await _fixture.CriarOrdensServicoEndpoints().GetById(ordem.Id, CancellationToken.None));
+        Assert.Equal((int)StatusOrdemServico.EmDiagnostico, atual.Value!.Status);
     }
 
     [Fact]
     public async Task AlterarStatus_OrdemInexistente_DeveRetornar404()
     {
-        Assert.IsType<NotFound<Dictionary<string, string?>>>(await _fixture.CriarOrdensServicoEndpoints().AlterarParaFinalizada(Guid.NewGuid(), CancellationToken.None));
+        Assert.IsType<NotFound<Dictionary<string, string?>>>(await _fixture.CriarOrdensServicoEndpoints().AlterarParaEntregue(Guid.NewGuid(), CancellationToken.None));
     }
 
     [Fact]
@@ -225,13 +255,13 @@ public sealed class OrdensServicoControllerIntegrationTests : IDisposable
         var finalizada = await CriarOrdemAsync();
         var cancelada = await CriarOrdemAsync();
 
-        await _fixture.CriarOrdensServicoEndpoints().AlterarParaEmDiagnostico(emDiagnostico.Id, CancellationToken.None);
-        await _fixture.CriarOrdensServicoEndpoints().AlterarParaEmDiagnostico(emExecucao.Id, CancellationToken.None);
-        await _fixture.CriarOrdensServicoEndpoints().AlterarParaEmExecucao(emExecucao.Id, CancellationToken.None);
-        await _fixture.CriarOrdensServicoEndpoints().AlterarParaEmDiagnostico(finalizada.Id, CancellationToken.None);
-        await _fixture.CriarOrdensServicoEndpoints().AlterarParaEmExecucao(finalizada.Id, CancellationToken.None);
-        await _fixture.CriarOrdensServicoEndpoints().AlterarParaFinalizada(finalizada.Id, CancellationToken.None);
-        await _fixture.CriarEventosController().ProcessarAsync("OrdemServicoRejeitada", $$"""{"ordemServicoId":"{{cancelada.Id}}","motivo":"Cliente nao encontrado."}""", CancellationToken.None);
+        await IniciarDiagnosticoAsync(emDiagnostico.Id);
+        await IniciarDiagnosticoAsync(emExecucao.Id);
+        await AprovarOrcamentoEPagamentoAsync(emExecucao.Id);
+        await IniciarDiagnosticoAsync(finalizada.Id);
+        await AprovarOrcamentoEPagamentoAsync(finalizada.Id);
+        await FinalizarExecucaoAsync(finalizada.Id);
+        await ProcessarEventoAsync("OrdemServicoRejeitada", $$"""{"ordemServicoId":"{{cancelada.Id}}","motivo":"Cliente nao encontrado."}""");
 
         var ok = Assert.IsType<Ok<IReadOnlyCollection<OrdemServicoOrdenadasViewModel>>>(await _fixture.CriarOrdensServicoEndpoints().GetOrdenadas(CancellationToken.None));
 

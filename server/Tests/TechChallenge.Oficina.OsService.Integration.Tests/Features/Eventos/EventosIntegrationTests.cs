@@ -10,7 +10,7 @@ using Xunit;
 
 namespace TechChallenge.Oficina.OsService.Integration.Tests.Features.Eventos;
 
-// Saga do lado do OS Service: eventos da Management e do Billing (JSON como chegam da fila) aplicados pela EventosController
+// Saga do lado do OS Service: eventos da Management, do Billing e da Execucao e Producao (JSON como chegam da fila) aplicados pela EventosController
 public sealed class EventosIntegrationTests : IDisposable
 {
     private readonly IntegrationTestFixture _fixture = new();
@@ -35,6 +35,37 @@ public sealed class EventosIntegrationTests : IDisposable
 
     private static string DadosPagamentoAprovado(Guid ordemServicoId) =>
         $$"""{"ordemServicoId":"{{ordemServicoId}}","pagamentoId":"{{Guid.NewGuid()}}","valor":389.90}""";
+
+    private static string DadosOrdemServico(Guid ordemServicoId) =>
+        $$"""{"ordemServicoId":"{{ordemServicoId}}"}""";
+
+    [Fact]
+    public async Task DiagnosticoIniciadoEExecucaoFinalizada_DevemLevarOrdemDeRecebidaAteFinalizada()
+    {
+        var ordemId = await CriarOrdemAsync();
+
+        Assert.Equal(ResultadoProcessamentoEvento.Processado, await ProcessarAsync("DiagnosticoIniciado", DadosOrdemServico(ordemId)));
+        Assert.Equal((int)StatusOrdemServico.EmDiagnostico, (await ObterAcompanhamentoAsync(ordemId)).Status);
+
+        await ProcessarAsync("OrcamentoGerado", $$"""{"ordemServicoId":"{{ordemId}}","valorTotal":389.90}""");
+        await ProcessarAsync("PagamentoAprovado", DadosPagamentoAprovado(ordemId));
+
+        Assert.Equal(ResultadoProcessamentoEvento.Processado, await ProcessarAsync("ExecucaoFinalizada", DadosOrdemServico(ordemId)));
+        var finalizada = await ObterAcompanhamentoAsync(ordemId);
+        Assert.Equal((int)StatusOrdemServico.Finalizada, finalizada.Status);
+        Assert.Equal(
+            [StatusOrdemServico.Recebida, StatusOrdemServico.EmDiagnostico, StatusOrdemServico.AguardandoAprovacao, StatusOrdemServico.EmExecucao, StatusOrdemServico.Finalizada],
+            finalizada.HistoricoStatus.Select(historico => historico.Status));
+
+        _fixture.EventosPublisherMock.Verify(p => p.PublicarAsync(
+            It.Is<OrdemServicoStatusAlterado>(evento => evento.StatusAnterior == 1 && evento.StatusNovo == 2),
+            ordemId,
+            It.IsAny<CancellationToken>()), Times.Once);
+        _fixture.EventosPublisherMock.Verify(p => p.PublicarAsync(
+            It.Is<OrdemServicoStatusAlterado>(evento => evento.StatusAnterior == 4 && evento.StatusNovo == 5),
+            ordemId,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
 
     [Fact]
     public async Task OrcamentoGeradoEPagamentoAprovado_DeveLevarOrdemParaEmExecucaoComValorEHistorico()
@@ -121,14 +152,15 @@ public sealed class EventosIntegrationTests : IDisposable
     }
 
     [Fact]
-    public async Task AguardandoAprovacao_NaoDeveIrParaEmExecucaoPeloHttp()
+    public async Task ExecucaoFinalizada_ComOrdemAguardandoAprovacao_DeveSerIgnoradaSemPularOPagamento()
     {
+        // Sem o PagamentoAprovado do Billing a OS nao entra em execucao, entao a finalizacao da Execucao e Producao nao se aplica
         var ordemId = await CriarOrdemAsync();
         await ProcessarAsync("OrcamentoGerado", $$"""{"ordemServicoId":"{{ordemId}}","valorTotal":100}""");
 
-        var badRequest = Assert.IsType<BadRequest<Dictionary<string, string?>>>(await _fixture.CriarOrdensServicoEndpoints().AlterarParaEmExecucao(ordemId, CancellationToken.None));
+        var resultado = await ProcessarAsync("ExecucaoFinalizada", DadosOrdemServico(ordemId));
 
-        Assert.Equal("Somente ordem de servico em diagnostico pode ser alterada para em execucao.", badRequest.Value!["message"]);
+        Assert.Equal(ResultadoProcessamentoEvento.Ignorado, resultado);
         Assert.Equal((int)StatusOrdemServico.AguardandoAprovacao, (await ObterAcompanhamentoAsync(ordemId)).Status);
     }
 
@@ -141,11 +173,14 @@ public sealed class EventosIntegrationTests : IDisposable
     }
 
     [Fact]
-    public async Task OrdemCancelada_NaoDeveAceitarMudancaDeStatusPeloHttp()
+    public async Task OrdemCancelada_DeveIgnorarDiagnosticoIniciado()
     {
         var ordemId = await CriarOrdemAsync();
         await ProcessarAsync("OrdemServicoRejeitada", $$"""{"ordemServicoId":"{{ordemId}}","motivo":"Veiculo nao encontrado."}""");
 
-        Assert.IsType<BadRequest<Dictionary<string, string?>>>(await _fixture.CriarOrdensServicoEndpoints().AlterarParaEmDiagnostico(ordemId, CancellationToken.None));
+        var resultado = await ProcessarAsync("DiagnosticoIniciado", DadosOrdemServico(ordemId));
+
+        Assert.Equal(ResultadoProcessamentoEvento.Ignorado, resultado);
+        Assert.Equal((int)StatusOrdemServico.Cancelada, (await ObterAcompanhamentoAsync(ordemId)).Status);
     }
 }

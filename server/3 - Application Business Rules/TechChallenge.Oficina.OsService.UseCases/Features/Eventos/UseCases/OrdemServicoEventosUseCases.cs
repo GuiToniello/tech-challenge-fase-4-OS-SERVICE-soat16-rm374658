@@ -8,7 +8,7 @@ using TechChallenge.Oficina.OsService.UseCases.Features.OrdensServico.UseCases;
 
 namespace TechChallenge.Oficina.OsService.UseCases.Features.Eventos.UseCases;
 
-// Processa os eventos da Management e do Billing sobre a OS (saga coreografada). E idempotente: a fila entrega pelo menos uma vez,
+// Processa os eventos da Management, do Billing e da Execucao e Producao sobre a OS (saga coreografada). E idempotente: a fila entrega pelo menos uma vez,
 // entao OS inexistente ou transicao nao permitida (evento repetido ou fora de ordem) resulta em Ignorado, sem excecao e sem publicar nada.
 public sealed class OrdemServicoEventosUseCases : IOrdemServicoEventosUseCases
 {
@@ -60,6 +60,24 @@ public sealed class OrdemServicoEventosUseCases : IOrdemServicoEventosUseCases
             evento.OrdemServicoId,
             OrdemServicoLogEventos.Etapas.OrcamentoRecusa,
             (ordemServico, dataAlteracao) => ordemServico.RegistrarOrcamentoRecusado(dataAlteracao),
+            cancellationToken);
+    }
+
+    public Task<ResultadoProcessamentoEvento> ProcessarDiagnosticoIniciadoAsync(DiagnosticoIniciado evento, CancellationToken cancellationToken = default)
+    {
+        return ProcessarAsync(
+            evento.OrdemServicoId,
+            OrdemServicoLogEventos.Etapas.Diagnostico,
+            (ordemServico, dataAlteracao) => ordemServico.AlterarParaEmDiagnostico(dataAlteracao),
+            cancellationToken);
+    }
+
+    public Task<ResultadoProcessamentoEvento> ProcessarExecucaoFinalizadaAsync(ExecucaoFinalizada evento, CancellationToken cancellationToken = default)
+    {
+        return ProcessarAsync(
+            evento.OrdemServicoId,
+            OrdemServicoLogEventos.Etapas.Finalizacao,
+            (ordemServico, dataAlteracao) => ordemServico.AlterarParaFinalizada(dataAlteracao),
             cancellationToken);
     }
 

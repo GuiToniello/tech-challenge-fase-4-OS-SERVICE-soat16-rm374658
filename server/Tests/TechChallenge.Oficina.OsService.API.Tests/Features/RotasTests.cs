@@ -48,10 +48,7 @@ public sealed class RotasTests
                 "GET /api/ordens-servico/{id:guid}",
                 "GET /api/ordens-servico/{id:guid}/acompanhamento",
                 "POST /api/ordens-servico",
-                "POST /api/ordens-servico/{id:guid}/em-diagnostico",
-                "POST /api/ordens-servico/{id:guid}/em-execucao",
                 "POST /api/ordens-servico/{id:guid}/entregar",
-                "POST /api/ordens-servico/{id:guid}/finalizar",
                 "PUT /api/ordens-servico"
             }.OrderBy(rota => rota),
             rotas);

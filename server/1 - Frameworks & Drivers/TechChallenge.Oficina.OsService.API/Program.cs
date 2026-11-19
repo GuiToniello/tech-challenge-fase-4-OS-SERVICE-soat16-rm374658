@@ -40,7 +40,7 @@ var sqsSettings = builder.Configuration
     .Get<SqsSettings>()
     ?? new SqsSettings();
 
-// Fan-out: cada evento da OS é publicado em todas as filas da lista (Management e Billing)
+// Fan-out: cada evento da OS é publicado em todas as filas da lista (Management, Billing e Execução)
 if (sqsSettings.FilasPublicacao.Length == 0 || sqsSettings.FilasPublicacao.Any(string.IsNullOrWhiteSpace))
 {
     throw new InvalidOperationException("SqsSettings:FilasPublicacao é obrigatório: informe ao menos uma fila, sem itens vazios.");

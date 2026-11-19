@@ -13,7 +13,7 @@ using TechChallenge.Oficina.OsService.UseCases.Features.OrdensServico.ViewModels
 namespace TechChallenge.Oficina.OsService.UseCases.Features.OrdensServico.UseCases;
 
 // Toda alteracao e gravada antes de publicar o evento. Se a publicacao falhar, a excecao sobe (o middleware responde 500) e a alteracao ja gravada permanece.
-// Depois de gravar, a publicacao nao e cancelada junto com a requisicao (CancellationToken.None): o evento precisa sair para a Management e o Billing.
+// Depois de gravar, a publicacao nao e cancelada junto com a requisicao (CancellationToken.None): o evento precisa sair para a Management, o Billing e a Execucao.
 public sealed class OrdemServicoUseCases : IOrdemServicoUseCases
 {
     private readonly IMapper _mapper;
@@ -115,45 +115,7 @@ public sealed class OrdemServicoUseCases : IOrdemServicoUseCases
         return _mapper.Map<IReadOnlyCollection<AcompanhamentoOrdemServicoViewModel>>(ordensServico);
     }
 
-    public async Task<OrdemServicoViewModel> AlterarStatusParaEmDiagnosticoAsync(AlterarStatusOrdemServicoCommand command, CancellationToken cancellationToken = default)
-    {
-        var (ordemServico, statusAnterior) = await AlterarStatusAsync(
-            command.Id,
-            OrdemServicoLogEventos.Etapas.Diagnostico,
-            (ordem, dataAlteracao) => ordem.AlterarParaEmDiagnostico(dataAlteracao),
-            cancellationToken);
-
-        await PublicarStatusAlteradoAsync(ordemServico, statusAnterior);
-
-        return _mapper.Map<OrdemServicoViewModel>(ordemServico);
-    }
-
-    public async Task<OrdemServicoViewModel> AlterarStatusParaEmExecucaoAsync(AlterarStatusOrdemServicoCommand command, CancellationToken cancellationToken = default)
-    {
-        var (ordemServico, statusAnterior) = await AlterarStatusAsync(
-            command.Id,
-            OrdemServicoLogEventos.Etapas.Execucao,
-            (ordem, dataAlteracao) => ordem.AlterarParaEmExecucao(dataAlteracao),
-            cancellationToken);
-
-        await PublicarStatusAlteradoAsync(ordemServico, statusAnterior);
-
-        return _mapper.Map<OrdemServicoViewModel>(ordemServico);
-    }
-
-    public async Task<OrdemServicoViewModel> AlterarStatusParaFinalizadaAsync(AlterarStatusOrdemServicoCommand command, CancellationToken cancellationToken = default)
-    {
-        var (ordemServico, statusAnterior) = await AlterarStatusAsync(
-            command.Id,
-            OrdemServicoLogEventos.Etapas.Finalizacao,
-            (ordem, dataAlteracao) => ordem.AlterarParaFinalizada(dataAlteracao),
-            cancellationToken);
-
-        await PublicarStatusAlteradoAsync(ordemServico, statusAnterior);
-
-        return _mapper.Map<OrdemServicoViewModel>(ordemServico);
-    }
-
+    // Diagnostico (1->2) e finalizacao (4->5) chegam por evento da Execucao e Producao (OrdemServicoEventosUseCases); pelo HTTP so a entrega
     public async Task<OrdemServicoViewModel> AlterarStatusParaEntregueAsync(AlterarStatusOrdemServicoCommand command, CancellationToken cancellationToken = default)
     {
         var (ordemServico, statusAnterior) = await AlterarStatusAsync(

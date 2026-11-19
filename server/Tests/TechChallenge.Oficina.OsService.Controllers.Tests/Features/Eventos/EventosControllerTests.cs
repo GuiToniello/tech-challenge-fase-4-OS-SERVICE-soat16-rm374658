@@ -79,6 +79,30 @@ public sealed class EventosControllerTests
         _useCasesMock.Verify(useCases => useCases.ProcessarOrcamentoRecusadoAsync(It.Is<OrcamentoRecusado>(evento => evento.OrdemServicoId == _ordemServicoId), It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact]
+    public async Task ProcessarAsync_DeveDespacharDiagnosticoIniciado()
+    {
+        _useCasesMock.Setup(useCases => useCases.ProcessarDiagnosticoIniciadoAsync(It.IsAny<DiagnosticoIniciado>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ResultadoProcessamentoEvento.Processado);
+
+        var resultado = await CriarController().ProcessarAsync("DiagnosticoIniciado", $$"""{"ordemServicoId":"{{_ordemServicoId}}"}""", CancellationToken.None);
+
+        Assert.Equal(ResultadoProcessamentoEvento.Processado, resultado);
+        _useCasesMock.Verify(useCases => useCases.ProcessarDiagnosticoIniciadoAsync(It.Is<DiagnosticoIniciado>(evento => evento.OrdemServicoId == _ordemServicoId), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessarAsync_DeveDespacharExecucaoFinalizada()
+    {
+        _useCasesMock.Setup(useCases => useCases.ProcessarExecucaoFinalizadaAsync(It.IsAny<ExecucaoFinalizada>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ResultadoProcessamentoEvento.Processado);
+
+        var resultado = await CriarController().ProcessarAsync("ExecucaoFinalizada", $$"""{"ordemServicoId":"{{_ordemServicoId}}"}""", CancellationToken.None);
+
+        Assert.Equal(ResultadoProcessamentoEvento.Processado, resultado);
+        _useCasesMock.Verify(useCases => useCases.ProcessarExecucaoFinalizadaAsync(It.Is<ExecucaoFinalizada>(evento => evento.OrdemServicoId == _ordemServicoId), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     // OrcamentoAprovado saiu do contrato (a OS so entra em execucao com o PagamentoAprovado); OrdemServicoValidada e de interesse do Billing
     [Theory]
     [InlineData("OrdemServicoAberta")]

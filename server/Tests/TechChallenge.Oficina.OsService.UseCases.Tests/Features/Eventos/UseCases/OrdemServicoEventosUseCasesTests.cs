@@ -42,9 +42,15 @@ public sealed class OrdemServicoEventosUseCasesTests
                 ordemServico.RegistrarOrcamentoGerado(100m);
                 ordemServico.RegistrarPagamentoAprovado();
                 break;
+            case StatusOrdemServico.Finalizada:
+                ordemServico.RegistrarOrcamentoGerado(100m);
+                ordemServico.RegistrarPagamentoAprovado();
+                ordemServico.AlterarParaFinalizada();
+                break;
             case StatusOrdemServico.Entregue:
                 ordemServico.AlterarParaEmDiagnostico();
-                ordemServico.AlterarParaEmExecucao();
+                ordemServico.RegistrarOrcamentoGerado(100m);
+                ordemServico.RegistrarPagamentoAprovado();
                 ordemServico.AlterarParaFinalizada();
                 ordemServico.AlterarParaEntregue();
                 break;
@@ -275,6 +281,158 @@ public sealed class OrdemServicoEventosUseCasesTests
 
         Assert.Equal(ResultadoProcessamentoEvento.Ignorado, resultado);
         VerificarIgnoradoSemGravarNemPublicar();
+    }
+
+    [Fact]
+    public async Task ProcessarDiagnosticoIniciadoAsync_DeveAlterarParaEmDiagnosticoGravarEPublicar()
+    {
+        var useCases = CriarUseCases();
+        var ordemServico = CriarOrdemNoStatus(StatusOrdemServico.Recebida);
+        ConfigurarOrdemExistente(ordemServico);
+
+        var resultado = await useCases.ProcessarDiagnosticoIniciadoAsync(new DiagnosticoIniciado(ordemServico.Id));
+
+        Assert.Equal(ResultadoProcessamentoEvento.Processado, resultado);
+        Assert.Equal(StatusOrdemServico.EmDiagnostico, ordemServico.Status);
+        _ordemServicoGatewayMock.Verify(g => g.AtualizarAsync(ordemServico, It.IsAny<CancellationToken>()), Times.Once);
+        VerificarStatusAlteradoPublicado(ordemServico, StatusOrdemServico.Recebida, StatusOrdemServico.EmDiagnostico);
+    }
+
+    [Fact]
+    public async Task ProcessarDiagnosticoIniciadoAsync_DeveIgnorar_QuandoEventoRepetido()
+    {
+        var useCases = CriarUseCases();
+        var ordemServico = CriarOrdemNoStatus(StatusOrdemServico.EmDiagnostico);
+        ConfigurarOrdemExistente(ordemServico);
+        var quantidadeHistorico = ordemServico.HistoricoStatus.Count;
+
+        var resultado = await useCases.ProcessarDiagnosticoIniciadoAsync(new DiagnosticoIniciado(ordemServico.Id));
+
+        Assert.Equal(ResultadoProcessamentoEvento.Ignorado, resultado);
+        Assert.Equal(quantidadeHistorico, ordemServico.HistoricoStatus.Count);
+        VerificarIgnoradoSemGravarNemPublicar();
+    }
+
+    [Theory]
+    [InlineData(StatusOrdemServico.AguardandoAprovacao)]
+    [InlineData(StatusOrdemServico.EmExecucao)]
+    [InlineData(StatusOrdemServico.Cancelada)]
+    public async Task ProcessarDiagnosticoIniciadoAsync_DeveIgnorar_QuandoNaoEstiverRecebida(StatusOrdemServico statusAtual)
+    {
+        var useCases = CriarUseCases();
+        var ordemServico = CriarOrdemNoStatus(statusAtual);
+        ConfigurarOrdemExistente(ordemServico);
+
+        var resultado = await useCases.ProcessarDiagnosticoIniciadoAsync(new DiagnosticoIniciado(ordemServico.Id));
+
+        Assert.Equal(ResultadoProcessamentoEvento.Ignorado, resultado);
+        Assert.Equal(statusAtual, ordemServico.Status);
+        VerificarIgnoradoSemGravarNemPublicar();
+    }
+
+    [Fact]
+    public async Task ProcessarDiagnosticoIniciadoAsync_DeveIgnorar_QuandoOrdemNaoExiste()
+    {
+        var useCases = CriarUseCases();
+
+        var resultado = await useCases.ProcessarDiagnosticoIniciadoAsync(new DiagnosticoIniciado(Guid.NewGuid()));
+
+        Assert.Equal(ResultadoProcessamentoEvento.Ignorado, resultado);
+        VerificarIgnoradoSemGravarNemPublicar();
+    }
+
+    [Fact]
+    public async Task ProcessarDiagnosticoIniciadoAsync_DeveRegistrarStatusAlteradoNaEtapaDiagnostico()
+    {
+        var loggerMock = new Mock<ILogger<OrdemServicoEventosUseCases>>();
+        var useCases = CriarUseCases(loggerMock.Object);
+        var ordemServico = CriarOrdemNoStatus(StatusOrdemServico.Recebida);
+        ConfigurarOrdemExistente(ordemServico);
+
+        await useCases.ProcessarDiagnosticoIniciadoAsync(new DiagnosticoIniciado(ordemServico.Id));
+
+        var invocacao = Assert.Single(loggerMock.Invocations, chamada => chamada.Method.Name == nameof(ILogger.Log) && ((EventId)chamada.Arguments[1]).Id == OrdemServicoLogEventos.OsStatusAlterado.Id);
+        var propriedades = ((IEnumerable<KeyValuePair<string, object?>>)invocacao.Arguments[2]).ToDictionary(propriedade => propriedade.Key, propriedade => propriedade.Value);
+        Assert.Equal("recebida", propriedades["StatusAnterior"]);
+        Assert.Equal("em_diagnostico", propriedades["StatusNovo"]);
+        Assert.Equal("diagnostico", propriedades["Etapa"]);
+    }
+
+    [Fact]
+    public async Task ProcessarExecucaoFinalizadaAsync_DeveAlterarParaFinalizadaGravarEPublicar()
+    {
+        var useCases = CriarUseCases();
+        var ordemServico = CriarOrdemNoStatus(StatusOrdemServico.EmExecucao);
+        ConfigurarOrdemExistente(ordemServico);
+
+        var resultado = await useCases.ProcessarExecucaoFinalizadaAsync(new ExecucaoFinalizada(ordemServico.Id));
+
+        Assert.Equal(ResultadoProcessamentoEvento.Processado, resultado);
+        Assert.Equal(StatusOrdemServico.Finalizada, ordemServico.Status);
+        _ordemServicoGatewayMock.Verify(g => g.AtualizarAsync(ordemServico, It.IsAny<CancellationToken>()), Times.Once);
+        VerificarStatusAlteradoPublicado(ordemServico, StatusOrdemServico.EmExecucao, StatusOrdemServico.Finalizada);
+    }
+
+    [Fact]
+    public async Task ProcessarExecucaoFinalizadaAsync_DeveIgnorar_QuandoEventoRepetido()
+    {
+        var useCases = CriarUseCases();
+        var ordemServico = CriarOrdemNoStatus(StatusOrdemServico.Finalizada);
+        ConfigurarOrdemExistente(ordemServico);
+        var quantidadeHistorico = ordemServico.HistoricoStatus.Count;
+
+        var resultado = await useCases.ProcessarExecucaoFinalizadaAsync(new ExecucaoFinalizada(ordemServico.Id));
+
+        Assert.Equal(ResultadoProcessamentoEvento.Ignorado, resultado);
+        Assert.Equal(quantidadeHistorico, ordemServico.HistoricoStatus.Count);
+        VerificarIgnoradoSemGravarNemPublicar();
+    }
+
+    // Aguardando aprovacao: sem o pagamento aprovado no Billing a OS nao entrou em execucao, entao nao ha o que finalizar
+    [Theory]
+    [InlineData(StatusOrdemServico.Recebida)]
+    [InlineData(StatusOrdemServico.EmDiagnostico)]
+    [InlineData(StatusOrdemServico.AguardandoAprovacao)]
+    [InlineData(StatusOrdemServico.Cancelada)]
+    public async Task ProcessarExecucaoFinalizadaAsync_DeveIgnorar_QuandoNaoEstiverEmExecucao(StatusOrdemServico statusAtual)
+    {
+        var useCases = CriarUseCases();
+        var ordemServico = CriarOrdemNoStatus(statusAtual);
+        ConfigurarOrdemExistente(ordemServico);
+
+        var resultado = await useCases.ProcessarExecucaoFinalizadaAsync(new ExecucaoFinalizada(ordemServico.Id));
+
+        Assert.Equal(ResultadoProcessamentoEvento.Ignorado, resultado);
+        Assert.Equal(statusAtual, ordemServico.Status);
+        VerificarIgnoradoSemGravarNemPublicar();
+    }
+
+    [Fact]
+    public async Task ProcessarExecucaoFinalizadaAsync_DeveIgnorar_QuandoOrdemNaoExiste()
+    {
+        var useCases = CriarUseCases();
+
+        var resultado = await useCases.ProcessarExecucaoFinalizadaAsync(new ExecucaoFinalizada(Guid.NewGuid()));
+
+        Assert.Equal(ResultadoProcessamentoEvento.Ignorado, resultado);
+        VerificarIgnoradoSemGravarNemPublicar();
+    }
+
+    [Fact]
+    public async Task ProcessarExecucaoFinalizadaAsync_DeveRegistrarStatusAlteradoNaEtapaFinalizacao()
+    {
+        var loggerMock = new Mock<ILogger<OrdemServicoEventosUseCases>>();
+        var useCases = CriarUseCases(loggerMock.Object);
+        var ordemServico = CriarOrdemNoStatus(StatusOrdemServico.EmExecucao);
+        ConfigurarOrdemExistente(ordemServico);
+
+        await useCases.ProcessarExecucaoFinalizadaAsync(new ExecucaoFinalizada(ordemServico.Id));
+
+        var invocacao = Assert.Single(loggerMock.Invocations, chamada => chamada.Method.Name == nameof(ILogger.Log) && ((EventId)chamada.Arguments[1]).Id == OrdemServicoLogEventos.OsStatusAlterado.Id);
+        var propriedades = ((IEnumerable<KeyValuePair<string, object?>>)invocacao.Arguments[2]).ToDictionary(propriedade => propriedade.Key, propriedade => propriedade.Value);
+        Assert.Equal("em_execucao", propriedades["StatusAnterior"]);
+        Assert.Equal("finalizada", propriedades["StatusNovo"]);
+        Assert.Equal("finalizacao", propriedades["Etapa"]);
     }
 
     [Fact]

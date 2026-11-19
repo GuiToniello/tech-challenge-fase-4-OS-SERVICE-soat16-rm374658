@@ -15,4 +15,5 @@ data:
   SqsSettings__FilaConsumo: "techchallenge-oficina-os-service.fifo"
   SqsSettings__FilasPublicacao__0: "techchallenge-oficina-management.fifo"
   SqsSettings__FilasPublicacao__1: "techchallenge-oficina-billing.fifo"
+  SqsSettings__FilasPublicacao__2: "techchallenge-oficina-execution.fifo"
   AWS_REGION: "us-east-1"

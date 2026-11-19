@@ -20,12 +20,6 @@ namespace TechChallenge.Oficina.OsService.Controllers.Features.OrdensServico
 
         Task<object> Delete(Guid id, CancellationToken cancellationToken);
 
-        Task<object> AlterarParaEmDiagnostico(Guid id, CancellationToken cancellationToken);
-
-        Task<object> AlterarParaEmExecucao(Guid id, CancellationToken cancellationToken);
-
-        Task<object> AlterarParaFinalizada(Guid id, CancellationToken cancellationToken);
-
         Task<object> AlterarParaEntregue(Guid id, CancellationToken cancellationToken);
     }
 }

@@ -89,39 +89,7 @@ namespace TechChallenge.Oficina.OsService.API.Features.OrdensServico
                 .Produces(StatusCodes.Status204NoContent)
                 .Produces(StatusCodes.Status404NotFound);
 
-            group.MapPost(
-                "/{id:guid}/em-diagnostico",
-                (
-                    IOrdensServicoController ordensServicoController,
-                    Guid id,
-                    CancellationToken cancellationToken
-                ) => ordensServicoController.AlterarParaEmDiagnostico(id, cancellationToken))
-                .Produces<OrdemServicoViewModel>(StatusCodes.Status200OK)
-                .Produces(StatusCodes.Status400BadRequest)
-                .Produces(StatusCodes.Status404NotFound);
-
-            group.MapPost(
-                "/{id:guid}/em-execucao",
-                (
-                    IOrdensServicoController ordensServicoController,
-                    Guid id,
-                    CancellationToken cancellationToken
-                ) => ordensServicoController.AlterarParaEmExecucao(id, cancellationToken))
-                .Produces<OrdemServicoViewModel>(StatusCodes.Status200OK)
-                .Produces(StatusCodes.Status400BadRequest)
-                .Produces(StatusCodes.Status404NotFound);
-
-            group.MapPost(
-                "/{id:guid}/finalizar",
-                (
-                    IOrdensServicoController ordensServicoController,
-                    Guid id,
-                    CancellationToken cancellationToken
-                ) => ordensServicoController.AlterarParaFinalizada(id, cancellationToken))
-                .Produces<OrdemServicoViewModel>(StatusCodes.Status200OK)
-                .Produces(StatusCodes.Status400BadRequest)
-                .Produces(StatusCodes.Status404NotFound);
-
+            // Diagnostico e finalizacao nao tem rota aqui: chegam pelos eventos DiagnosticoIniciado e ExecucaoFinalizada da Execucao e Producao
             group.MapPost(
                 "/{id:guid}/entregar",
                 (
