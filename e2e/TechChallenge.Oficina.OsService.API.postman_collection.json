@@ -1168,7 +1168,7 @@
     },
     {
       "name": "Saga",
-      "description": "Saga coreografada OS Service, Management, Billing e Execucao e Producao via SQS: a Management valida a OS, a Execucao e Producao inicia o diagnostico, o Billing gera e aprova o orcamento e confirma o pagamento (a OS so entra em execucao com o evento PagamentoAprovado), e a Execucao e Producao conduz a fila de execucao e finaliza a OS (evento ExecucaoFinalizada); a entrega e feita no OS Service. No modo simulado do Billing (sem AccessToken do Mercado Pago) a verificacao aprova o pagamento; com o Mercado Pago real, pague pelo link do passo 06 antes do passo 07. Os passos com espera aguardam o consumo do evento pela outra API (tempo_espera_ms). Requer as quatro APIs usando o mesmo broker.",
+      "description": "Saga coreografada OS Service, Management, Billing e Execucao e Producao via SQS: a Management valida a OS, a Execucao e Producao inicia o diagnostico, o Billing gera e aprova o orcamento e confirma o pagamento (a OS so entra em execucao com o evento PagamentoAprovado), e a Execucao e Producao conduz a fila de execucao e finaliza a OS (evento ExecucaoFinalizada), com a linha do tempo da producao conferida no passo 13; a entrega e feita no OS Service. No modo simulado do Billing (sem AccessToken do Mercado Pago) a verificacao aprova o pagamento; com o Mercado Pago real, pague pelo link do passo 06 antes do passo 07. Os passos com espera aguardam o consumo do evento pela outra API (tempo_espera_ms). Requer as quatro APIs usando o mesmo broker.",
       "item": [
         {
           "name": "01 - Abrir OS para Orcamento (201)",
@@ -1635,7 +1635,53 @@
           }
         },
         {
-          "name": "13 - Entregar OS (200)",
+          "name": "13 - Linha do Tempo da Execucao (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Linha do tempo da producao na Execucao e Producao (DynamoDB): diagnostico, entrada na fila (pagamento aprovado), inicio e fim da execucao",
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                  "var historico = pm.response.json();",
+                  "pm.test('Retorna array', function () { pm.expect(historico).to.be.an('array'); });",
+                  "pm.test('Diagnostico, entrada na fila, inicio e fim da execucao, nessa ordem', function () {",
+                  "  var tipos = historico.map(function (evento) { return evento.tipo; });",
+                  "  var esperados = ['DiagnosticoIniciado', 'EntrouNaFila', 'ExecucaoIniciada', 'ExecucaoFinalizada'];",
+                  "  var posicoes = esperados.map(function (tipo) { return tipos.indexOf(tipo); });",
+                  "  posicoes.forEach(function (posicao, indice) { pm.expect(posicao, esperados[indice] + ' na linha do tempo').to.be.at.least(0); });",
+                  "  for (var i = 1; i < posicoes.length; i++) { pm.expect(posicoes[i], esperados[i] + ' depois de ' + esperados[i - 1]).to.be.above(posicoes[i - 1]); }",
+                  "});",
+                  "pm.test('Tempo na fila e tempo de execucao registrados', function () {",
+                  "  var inicio = historico.find(function (evento) { return evento.tipo === 'ExecucaoIniciada'; });",
+                  "  var fim = historico.find(function (evento) { return evento.tipo === 'ExecucaoFinalizada'; });",
+                  "  pm.expect(inicio && inicio.tempoNaFilaSegundos).to.be.a('number');",
+                  "  pm.expect(fim && fim.tempoExecucaoSegundos).to.be.a('number');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{executionBaseUrl}}/api/execucoes/{{os_saga_id}}/historico",
+              "host": [
+                "{{executionBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "execucoes",
+                "{{os_saga_id}}",
+                "historico"
+              ]
+            }
+          }
+        },
+        {
+          "name": "14 - Entregar OS (200)",
           "event": [
             {
               "listen": "test",
@@ -1666,7 +1712,7 @@
           }
         },
         {
-          "name": "14 - Obter Indicadores apos a Saga (200)",
+          "name": "15 - Obter Indicadores apos a Saga (200)",
           "event": [
             {
               "listen": "test",
@@ -1695,7 +1741,7 @@
           }
         },
         {
-          "name": "15 - Abrir OS com Cliente Inexistente (201)",
+          "name": "16 - Abrir OS com Cliente Inexistente (201)",
           "event": [
             {
               "listen": "prerequest",
@@ -1744,7 +1790,7 @@
           }
         },
         {
-          "name": "16 - Acompanhamento OS Cancelada pela Management (200)",
+          "name": "17 - Acompanhamento OS Cancelada pela Management (200)",
           "event": [
             {
               "listen": "prerequest",
