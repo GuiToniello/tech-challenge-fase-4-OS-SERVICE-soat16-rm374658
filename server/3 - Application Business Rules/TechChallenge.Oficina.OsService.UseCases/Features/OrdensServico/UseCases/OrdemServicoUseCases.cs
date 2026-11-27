@@ -20,6 +20,7 @@ public sealed class OrdemServicoUseCases : IOrdemServicoUseCases
     private readonly IOrdemServicoGateway _ordemServicoGateway;
     private readonly IIndicadorUseCases _indicadorUseCases;
     private readonly IEventosPublisher _eventosPublisher;
+    private readonly IHistoricoSagaGateway _historicoSagaGateway;
     private readonly ILogger<OrdemServicoUseCases> _logger;
 
     public OrdemServicoUseCases(
@@ -27,12 +28,14 @@ public sealed class OrdemServicoUseCases : IOrdemServicoUseCases
         IOrdemServicoGateway ordemServicoGateway,
         IIndicadorUseCases indicadorUseCases,
         IEventosPublisher eventosPublisher,
+        IHistoricoSagaGateway historicoSagaGateway,
         ILogger<OrdemServicoUseCases> logger)
     {
         _mapper = mapper;
         _ordemServicoGateway = ordemServicoGateway;
         _indicadorUseCases = indicadorUseCases;
         _eventosPublisher = eventosPublisher;
+        _historicoSagaGateway = historicoSagaGateway;
         _logger = logger;
     }
 
@@ -113,6 +116,13 @@ public sealed class OrdemServicoUseCases : IOrdemServicoUseCases
         // O cadastro de clientes fica na Management: cliente sem ordens (ou inexistente) resulta em lista vazia
         var ordensServico = await _ordemServicoGateway.ListarPorClienteAsync(query.ClienteId, cancellationToken);
         return _mapper.Map<IReadOnlyCollection<AcompanhamentoOrdemServicoViewModel>>(ordensServico);
+    }
+
+    public async Task<IReadOnlyCollection<EventoHistoricoSagaViewModel>> ListarHistoricoSagaAsync(ListarHistoricoSagaQuery query, CancellationToken cancellationToken = default)
+    {
+        // So o DynamoDB, sem consultar o PostgreSQL: OS excluida ou desconhecida retorna o que houver no historico (ou lista vazia)
+        var historico = await _historicoSagaGateway.ListarAsync(query.Id, cancellationToken);
+        return _mapper.Map<IReadOnlyCollection<EventoHistoricoSagaViewModel>>(historico.OrderBy(evento => evento.OcorridoEm).ToArray());
     }
 
     // Diagnostico (1->2) e finalizacao (4->5) chegam por evento da Execucao e Producao (OrdemServicoEventosUseCases); pelo HTTP so a entrega

@@ -125,6 +125,35 @@ public sealed class OrdensServicoAdapterTests
     }
 
     [Fact]
+    public void Adapt_DeveRetornarOk_QuandoHistoricoSagaSucesso()
+    {
+        IReadOnlyCollection<EventoHistoricoSagaViewModel> historico = [new EventoHistoricoSagaViewModel { Tipo = "PagamentoAprovado", Origem = "billing", Resultado = "Processado" }];
+
+        var adaptado = _adapter.Adapt(new OrdensServicoResult<IReadOnlyCollection<EventoHistoricoSagaViewModel>, Exception>(historico));
+
+        var ok = Assert.IsType<Ok<IReadOnlyCollection<EventoHistoricoSagaViewModel>>>(adaptado);
+        Assert.Same(historico, ok.Value);
+    }
+
+    [Fact]
+    public void Adapt_DeveRetornarOkComListaVazia_QuandoSemHistoricoSaga()
+    {
+        var adaptado = _adapter.Adapt(new OrdensServicoResult<IReadOnlyCollection<EventoHistoricoSagaViewModel>, Exception>(Array.Empty<EventoHistoricoSagaViewModel>()));
+
+        var ok = Assert.IsType<Ok<IReadOnlyCollection<EventoHistoricoSagaViewModel>>>(adaptado);
+        Assert.Empty(ok.Value!);
+    }
+
+    [Fact]
+    public void Adapt_DeveRetornarProblem_QuandoFalhaNaConsultaDoHistoricoSaga()
+    {
+        var adaptado = _adapter.Adapt(new OrdensServicoResult<IReadOnlyCollection<EventoHistoricoSagaViewModel>, Exception>(new InvalidOperationException("falha")));
+
+        var problem = Assert.IsType<ProblemHttpResult>(adaptado);
+        Assert.Equal(StatusCodes.Status500InternalServerError, problem.StatusCode);
+    }
+
+    [Fact]
     public void Adapt_DeveRetornarOk_QuandoResultadoBooleanoVerdadeiro()
     {
         var adaptado = _adapter.Adapt(new OrdensServicoResult<bool, Exception>(true));

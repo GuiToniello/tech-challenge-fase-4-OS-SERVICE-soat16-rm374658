@@ -89,6 +89,35 @@ public sealed class OrdensServicoEndpointsTests
     }
 
     [Fact]
+    public async Task MapOrdensServicoEndpoints_GetHistoricoSaga_DeveRetornarOkComOsEventos()
+    {
+        var id = Guid.NewGuid();
+        IReadOnlyCollection<EventoHistoricoSagaViewModel> historico =
+        [
+            new EventoHistoricoSagaViewModel { Tipo = "DiagnosticoIniciado", Origem = "execution", Resultado = "Processado", StatusAnterior = 1, StatusNovo = 2 },
+            new EventoHistoricoSagaViewModel { Tipo = "DiagnosticoIniciado", Origem = "execution", Resultado = "Ignorado", StatusAnterior = 2, StatusNovo = 2, Motivo = "Somente ordem de servico recebida pode ser alterada para em diagnostico." }
+        ];
+        _ordemServicoUseCasesMock.Setup(s => s.ListarHistoricoSagaAsync(It.Is<ListarHistoricoSagaQuery>(q => q.Id == id), It.IsAny<CancellationToken>())).ReturnsAsync(historico);
+
+        var resultado = await CriarController().GetHistoricoSaga(id, CancellationToken.None);
+
+        var ok = Assert.IsType<Ok<IReadOnlyCollection<EventoHistoricoSagaViewModel>>>(resultado);
+        Assert.Equal(["Processado", "Ignorado"], ok.Value!.Select(evento => evento.Resultado));
+    }
+
+    [Fact]
+    public async Task MapOrdensServicoEndpoints_GetHistoricoSaga_DeveRetornarOkComListaVazia_QuandoSemRegistros()
+    {
+        _ordemServicoUseCasesMock
+            .Setup(s => s.ListarHistoricoSagaAsync(It.IsAny<ListarHistoricoSagaQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<EventoHistoricoSagaViewModel>());
+
+        var resultado = await CriarController().GetHistoricoSaga(Guid.NewGuid(), CancellationToken.None);
+
+        Assert.Empty(Assert.IsType<Ok<IReadOnlyCollection<EventoHistoricoSagaViewModel>>>(resultado).Value!);
+    }
+
+    [Fact]
     public async Task MapOrdensServicoEndpoints_Put_DeveRepassarComandoInteiro()
     {
         var command = new AtualizarOrdemServicoCommand { Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), VeiculoId = Guid.NewGuid(), ServicoIds = [Guid.NewGuid()] };

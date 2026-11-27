@@ -1168,7 +1168,7 @@
     },
     {
       "name": "Saga",
-      "description": "Saga coreografada OS Service, Management, Billing e Execucao e Producao via SQS: a Management valida a OS, a Execucao e Producao inicia o diagnostico, o Billing gera e aprova o orcamento e confirma o pagamento (a OS so entra em execucao com o evento PagamentoAprovado), e a Execucao e Producao conduz a fila de execucao e finaliza a OS (evento ExecucaoFinalizada), com a linha do tempo da producao conferida no passo 13; a entrega e feita no OS Service. No modo simulado do Billing (sem AccessToken do Mercado Pago) a verificacao aprova o pagamento; com o Mercado Pago real, pague pelo link do passo 06 antes do passo 07. Os passos com espera aguardam o consumo do evento pela outra API (tempo_espera_ms). Requer as quatro APIs usando o mesmo broker.",
+      "description": "Saga coreografada OS Service, Management, Billing e Execucao e Producao via SQS: a Management valida a OS, a Execucao e Producao inicia o diagnostico, o Billing gera e aprova o orcamento e confirma o pagamento (a OS so entra em execucao com o evento PagamentoAprovado), e a Execucao e Producao conduz a fila de execucao e finaliza a OS (evento ExecucaoFinalizada), com a linha do tempo da producao conferida no passo 13; a entrega e feita no OS Service. O historico da saga do OS Service (DynamoDB), com cada evento consumido e o resultado (Processado ou Ignorado), e conferido nos passos 18 (OS da saga) e 19 (OS cancelada pela Management). No modo simulado do Billing (sem AccessToken do Mercado Pago) a verificacao aprova o pagamento; com o Mercado Pago real, pague pelo link do passo 06 antes do passo 07. Os passos com espera aguardam o consumo do evento pela outra API (tempo_espera_ms). Requer as quatro APIs usando o mesmo broker.",
       "item": [
         {
           "name": "01 - Abrir OS para Orcamento (201)",
@@ -1828,6 +1828,90 @@
                 "ordens-servico",
                 "{{os_rejeitada_id}}",
                 "acompanhamento"
+              ]
+            }
+          }
+        },
+        {
+          "name": "18 - Historico da Saga (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Historico da saga no OS Service (DynamoDB): cada evento consumido com o resultado. Reentregas da fila ficam como Ignorado e sao toleradas",
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                  "var historico = pm.response.json();",
+                  "pm.test('Retorna array', function () { pm.expect(historico).to.be.an('array'); });",
+                  "var processados = historico.filter(function (evento) { return evento.resultado === 'Processado'; });",
+                  "pm.test('Diagnostico, orcamento, pagamento e finalizacao processados, nessa ordem', function () {",
+                  "  pm.expect(processados.map(function (evento) { return evento.tipo; })).to.eql(['DiagnosticoIniciado', 'OrcamentoGerado', 'PagamentoAprovado', 'ExecucaoFinalizada']);",
+                  "});",
+                  "pm.test('Origem de cada evento conforme o contrato', function () {",
+                  "  pm.expect(processados.map(function (evento) { return evento.origem; })).to.eql(['execution', 'billing', 'billing', 'execution']);",
+                  "});",
+                  "pm.test('Status anterior e novo de cada evento processado', function () {",
+                  "  var transicoes = processados.map(function (evento) { return evento.statusAnterior + '->' + evento.statusNovo; });",
+                  "  pm.expect(transicoes).to.eql(['1->2', '2->3', '3->4', '4->5']);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/ordens-servico/{{os_saga_id}}/historico-saga",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "ordens-servico",
+                "{{os_saga_id}}",
+                "historico-saga"
+              ]
+            }
+          }
+        },
+        {
+          "name": "19 - Historico da Saga da OS Cancelada (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// A compensacao da Management (OrdemServicoRejeitada) fica no historico da saga da OS cancelada",
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                  "var historico = pm.response.json();",
+                  "pm.test('Retorna array', function () { pm.expect(historico).to.be.an('array'); });",
+                  "var rejeitada = historico.find(function (evento) { return evento.tipo === 'OrdemServicoRejeitada' && evento.resultado === 'Processado'; });",
+                  "pm.test('OrdemServicoRejeitada processado no historico', function () { pm.expect(rejeitada, 'OrdemServicoRejeitada no historico').to.be.an('object'); });",
+                  "pm.test('Origem management, de recebida (1) para cancelada (8)', function () {",
+                  "  pm.expect(rejeitada && rejeitada.origem).to.eql('management');",
+                  "  pm.expect(rejeitada && rejeitada.statusAnterior).to.eql(1);",
+                  "  pm.expect(rejeitada && rejeitada.statusNovo).to.eql(8);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/ordens-servico/{{os_rejeitada_id}}/historico-saga",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "ordens-servico",
+                "{{os_rejeitada_id}}",
+                "historico-saga"
               ]
             }
           }

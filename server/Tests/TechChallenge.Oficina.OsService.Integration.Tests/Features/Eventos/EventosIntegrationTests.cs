@@ -139,6 +139,31 @@ public sealed class EventosIntegrationTests : IDisposable
     }
 
     [Fact]
+    public async Task EventoAplicadoERepetido_DeveFicarNoHistoricoDaSagaComoProcessadoEDepoisIgnorado()
+    {
+        var ordemId = await CriarOrdemAsync();
+
+        Assert.Equal(ResultadoProcessamentoEvento.Processado, await ProcessarAsync("DiagnosticoIniciado", DadosOrdemServico(ordemId)));
+        Assert.Equal(ResultadoProcessamentoEvento.Ignorado, await ProcessarAsync("DiagnosticoIniciado", DadosOrdemServico(ordemId)));
+
+        // O historico guarda o veredito de cada entrega; o status da OS continua so no PostgreSQL
+        var historico = _fixture.HistoricoSaga.Eventos.Where(evento => evento.OrdemServicoId == ordemId).ToArray();
+        Assert.Equal([ResultadoProcessamentoEvento.Processado, ResultadoProcessamentoEvento.Ignorado], historico.Select(evento => evento.Resultado));
+        Assert.All(historico, evento =>
+        {
+            Assert.Equal("DiagnosticoIniciado", evento.Tipo);
+            Assert.Equal("execution", evento.Origem);
+        });
+        Assert.Equal(1, historico[0].StatusAnterior);
+        Assert.Equal(2, historico[0].StatusNovo);
+        Assert.Null(historico[0].Motivo);
+        Assert.Equal(2, historico[1].StatusAnterior);
+        Assert.Equal(2, historico[1].StatusNovo);
+        Assert.Equal("Somente ordem de servico recebida pode ser alterada para em diagnostico.", historico[1].Motivo);
+        Assert.Equal((int)StatusOrdemServico.EmDiagnostico, (await ObterAcompanhamentoAsync(ordemId)).Status);
+    }
+
+    [Fact]
     public async Task OrcamentoAprovado_ForaDoContrato_DeveSerIgnoradoSemAlterarAOrdem()
     {
         // A aprovacao do orcamento sozinha nao inicia a execucao: so o PagamentoAprovado do Billing

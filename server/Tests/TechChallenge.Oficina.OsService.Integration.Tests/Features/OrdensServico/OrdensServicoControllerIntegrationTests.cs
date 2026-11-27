@@ -42,6 +42,12 @@ public sealed class OrdensServicoControllerIntegrationTests : IDisposable
     private Task FinalizarExecucaoAsync(Guid ordemId) =>
         ProcessarEventoAsync("ExecucaoFinalizada", $$"""{"ordemServicoId":"{{ordemId}}"}""");
 
+    private async Task<EventoHistoricoSagaViewModel[]> ObterHistoricoSagaAsync(Guid ordemId)
+    {
+        var ok = Assert.IsType<Ok<IReadOnlyCollection<EventoHistoricoSagaViewModel>>>(await _fixture.CriarOrdensServicoEndpoints().GetHistoricoSaga(ordemId, CancellationToken.None));
+        return ok.Value!.ToArray();
+    }
+
     [Fact]
     public async Task Post_OrdemServicoValida_DeveRetornar201EPublicarOrdemServicoAberta()
     {
@@ -208,6 +214,70 @@ public sealed class OrdensServicoControllerIntegrationTests : IDisposable
                 ordem.Id,
                 It.IsAny<CancellationToken>()), Times.Once);
         }
+    }
+
+    [Fact]
+    public async Task GetHistoricoSaga_AposASaga_DeveRetornar200ComOsEventosConsumidosEmOrdem()
+    {
+        var ordem = await CriarOrdemAsync();
+        await IniciarDiagnosticoAsync(ordem.Id);
+        await ProcessarEventoAsync("OrcamentoGerado", $$"""{"ordemServicoId":"{{ordem.Id}}","valorTotal":100}""");
+        // Gera o orcamento de novo (regerado: processado sem mudanca de status, 3 -> 3) e aprova o pagamento
+        await AprovarOrcamentoEPagamentoAsync(ordem.Id);
+        await FinalizarExecucaoAsync(ordem.Id);
+        // A entrega e feita pelo HTTP, nao por evento: nao entra no historico da saga
+        Assert.IsType<Ok<OrdemServicoViewModel>>(await _fixture.CriarOrdensServicoEndpoints().AlterarParaEntregue(ordem.Id, CancellationToken.None));
+
+        var historico = await ObterHistoricoSagaAsync(ordem.Id);
+
+        Assert.Equal(["DiagnosticoIniciado", "OrcamentoGerado", "OrcamentoGerado", "PagamentoAprovado", "ExecucaoFinalizada"], historico.Select(evento => evento.Tipo));
+        Assert.Equal(["execution", "billing", "billing", "billing", "execution"], historico.Select(evento => evento.Origem));
+        Assert.Equal(new int?[] { 1, 2, 3, 3, 4 }, historico.Select(evento => evento.StatusAnterior));
+        Assert.Equal(new int?[] { 2, 3, 3, 4, 5 }, historico.Select(evento => evento.StatusNovo));
+        Assert.All(historico, evento =>
+        {
+            Assert.Equal("Processado", evento.Resultado);
+            Assert.Null(evento.Motivo);
+        });
+    }
+
+    [Fact]
+    public async Task GetHistoricoSaga_OrdemSemEventos_DeveRetornar200ComListaVazia()
+    {
+        var ordem = await CriarOrdemAsync();
+
+        Assert.Empty(await ObterHistoricoSagaAsync(ordem.Id));
+        Assert.Empty(await ObterHistoricoSagaAsync(Guid.NewGuid()));
+    }
+
+    [Fact]
+    public async Task GetHistoricoSaga_OrdemExcluidaOuDesconhecida_DeveRetornar200ComOQueHouverNoHistorico()
+    {
+        // A consulta nao passa pelo PostgreSQL: o historico continua disponivel depois da exclusao da OS
+        var ordem = await CriarOrdemAsync();
+        await ProcessarEventoAsync("OrdemServicoRejeitada", $$"""{"ordemServicoId":"{{ordem.Id}}","motivo":"Cliente nao encontrado."}""");
+        Assert.IsType<NoContent>(await _fixture.CriarOrdensServicoEndpoints().Delete(ordem.Id, CancellationToken.None));
+        // Evento de uma OS que o OS Service nao conhece: ignorado e registrado sem status
+        var desconhecidaId = Guid.NewGuid();
+        var resultado = await _fixture.CriarEventosController().ProcessarAsync(
+            "PagamentoAprovado",
+            $$"""{"ordemServicoId":"{{desconhecidaId}}","pagamentoId":"{{Guid.NewGuid()}}","valor":100}""",
+            CancellationToken.None);
+        Assert.Equal(ResultadoProcessamentoEvento.Ignorado, resultado);
+
+        var cancelada = Assert.Single(await ObterHistoricoSagaAsync(ordem.Id));
+        Assert.Equal("OrdemServicoRejeitada", cancelada.Tipo);
+        Assert.Equal("management", cancelada.Origem);
+        Assert.Equal("Processado", cancelada.Resultado);
+        Assert.Equal(1, cancelada.StatusAnterior);
+        Assert.Equal(8, cancelada.StatusNovo);
+        var ignorado = Assert.Single(await ObterHistoricoSagaAsync(desconhecidaId));
+        Assert.Equal("PagamentoAprovado", ignorado.Tipo);
+        Assert.Equal("billing", ignorado.Origem);
+        Assert.Equal("Ignorado", ignorado.Resultado);
+        Assert.Null(ignorado.StatusAnterior);
+        Assert.Null(ignorado.StatusNovo);
+        Assert.Equal("Ordem de servico nao encontrada.", ignorado.Motivo);
     }
 
     [Fact]

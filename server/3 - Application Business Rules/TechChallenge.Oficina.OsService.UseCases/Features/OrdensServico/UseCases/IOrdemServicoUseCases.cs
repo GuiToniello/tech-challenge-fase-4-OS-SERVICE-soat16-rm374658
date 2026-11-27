@@ -15,4 +15,7 @@ public interface IOrdemServicoUseCases
     Task<AcompanhamentoOrdemServicoViewModel> ObterAcompanhamentoAsync(ObterAcompanhamentoOrdemServicoPorIdQuery query, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<AcompanhamentoOrdemServicoViewModel>> ListarPorClienteAsync(ListarOrdensServicoPorClienteQuery query, CancellationToken cancellationToken = default);
     Task<OrdemServicoViewModel> AlterarStatusParaEntregueAsync(AlterarStatusOrdemServicoCommand command, CancellationToken cancellationToken = default);
+
+    // Historico da saga da OS (DynamoDB) em ordem cronologica; vazio quando nao ha registros
+    Task<IReadOnlyCollection<EventoHistoricoSagaViewModel>> ListarHistoricoSagaAsync(ListarHistoricoSagaQuery query, CancellationToken cancellationToken = default);
 }

@@ -16,6 +16,8 @@ namespace TechChallenge.Oficina.OsService.Controllers.Features.OrdensServico
 
         Task<object> GetByCliente(Guid clienteId, CancellationToken cancellationToken);
 
+        Task<object> GetHistoricoSaga(Guid id, CancellationToken cancellationToken);
+
         Task<object> Put(AtualizarOrdemServicoCommand command, CancellationToken cancellationToken);
 
         Task<object> Delete(Guid id, CancellationToken cancellationToken);

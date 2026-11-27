@@ -59,6 +59,17 @@ namespace TechChallenge.Oficina.OsService.API.Features.OrdensServico
                 .Produces<AcompanhamentoOrdemServicoViewModel>(StatusCodes.Status200OK)
                 .Produces(StatusCodes.Status404NotFound);
 
+            // Historico da saga da OS (DynamoDB), em ordem cronologica: cada evento consumido com o resultado (Processado ou Ignorado).
+            // Nao consulta o PostgreSQL: OS excluida ou desconhecida tambem responde 200, com o que houver no historico (ou lista vazia)
+            group.MapGet(
+                "/{id:guid}/historico-saga",
+                (
+                    IOrdensServicoController ordensServicoController,
+                    Guid id,
+                    CancellationToken cancellationToken
+                ) => ordensServicoController.GetHistoricoSaga(id, cancellationToken))
+                .Produces<IReadOnlyCollection<EventoHistoricoSagaViewModel>>(StatusCodes.Status200OK);
+
             group.MapGet(
                 "/cliente/{clienteId:guid}",
                 (

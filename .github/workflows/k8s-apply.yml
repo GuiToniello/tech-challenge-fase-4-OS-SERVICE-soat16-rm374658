@@ -1,8 +1,9 @@
 name: K8s Apply
 # Reaplica os manifests (kubernetes/k8s/) no EKS e, por padrão, reinicia a API.
 # Requer o ambiente de pé (Bootstrap da MANAGEMENT e deste repo) e a imagem no ECR. Útil depois de
-# recriar a chave do SQS no repo MANAGEMENT (para trocar RDS_PASSWORD, rode o Bootstrap: a senha nova
-# também precisa ser aplicada no RDS).
+# recriar a chave do usuário IAM do OS Service (SQS e DynamoDB) no repo MANAGEMENT. Para trocar
+# RDS_PASSWORD, ou se a MANAGEMENT recriar o próprio usuário IAM, rode o Bootstrap: a senha nova também
+# precisa ser aplicada no RDS, e a política da tabela DynamoDB, no usuário novo.
 
 on:
   workflow_dispatch:

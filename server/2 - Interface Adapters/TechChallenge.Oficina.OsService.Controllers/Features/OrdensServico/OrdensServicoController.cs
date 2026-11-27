@@ -99,6 +99,15 @@ namespace TechChallenge.Oficina.OsService.Controllers.Features.OrdensServico
             return _ordensServicoAdapter.Adapt(result);
         }
 
+        // Falha do DynamoDB ja sai como integracao.falha no gateway do historico e segue para o tratamento global (500)
+        public async Task<object> GetHistoricoSaga(Guid id, CancellationToken cancellationToken)
+        {
+            var historico = await _ordemServicoUseCases.ListarHistoricoSagaAsync(new ListarHistoricoSagaQuery { Id = id }, cancellationToken);
+            var result = OrdensServicoResult.From(historico);
+
+            return _ordensServicoAdapter.Adapt(result);
+        }
+
         public async Task<object> Put(AtualizarOrdemServicoCommand command, CancellationToken cancellationToken)
         {
             try

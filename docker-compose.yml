@@ -26,6 +26,16 @@ services:
       - ./elasticmq.conf:/opt/elasticmq.conf:ro
     restart: unless-stopped
 
+  # DynamoDB local (historico da saga): em memoria, a tabela e criada pela API ao subir
+  dynamodb-local:
+    image: docker.io/amazon/dynamodb-local:3.1.0
+    container_name: oficina-os-dynamodb
+    working_dir: /home/dynamodblocal
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
+    ports:
+      - "${DYNAMODB_PORT:-8002}:8000"
+    restart: unless-stopped
+
   os-service-api:
     image: ${REGISTRY_PREFIX:-}techchallenge-oficina-os-service:${IMAGE_TAG:-latest}
     build:
@@ -36,6 +46,8 @@ services:
       postgres:
         condition: service_healthy
       elasticmq:
+        condition: service_started
+      dynamodb-local:
         condition: service_started
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
@@ -49,6 +61,8 @@ services:
       SqsSettings__FilasPublicacao__1: techchallenge-oficina-billing.fifo
       SqsSettings__FilasPublicacao__2: techchallenge-oficina-execution.fifo
       SqsSettings__ServiceUrl: ${SQS_SERVICE_URL:-http://elasticmq:9324}
+      DynamoDbSettings__ServiceUrl: ${DYNAMODB_SERVICE_URL:-http://dynamodb-local:8000}
+      # Credenciais ficticias para o ElasticMQ e o DynamoDB local (nao validam assinatura); fixas para nunca herdar credenciais AWS reais do shell
       AWS_ACCESS_KEY_ID: local
       AWS_SECRET_ACCESS_KEY: local
       AWS_REGION: us-east-1

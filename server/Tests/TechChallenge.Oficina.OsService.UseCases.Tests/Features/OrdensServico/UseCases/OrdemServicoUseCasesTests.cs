@@ -5,6 +5,7 @@ using Moq;
 using TechChallenge.Oficina.OsService.Entities.Exceptions;
 using TechChallenge.Oficina.OsService.Entities.Features.OrdensServico;
 using TechChallenge.Oficina.OsService.Entities.Features.OrdensServico.Enums;
+using TechChallenge.Oficina.OsService.UseCases.Features.Eventos;
 using TechChallenge.Oficina.OsService.UseCases.Features.Eventos.Contratos;
 using TechChallenge.Oficina.OsService.UseCases.Features.Eventos.Interfaces;
 using TechChallenge.Oficina.OsService.UseCases.Features.Indicadores.UseCases;
@@ -23,6 +24,7 @@ public sealed class OrdemServicoUseCasesTests
     private readonly Mock<IOrdemServicoGateway> _ordemServicoGatewayMock = new();
     private readonly Mock<IIndicadorUseCases> _indicadorUseCasesMock = new();
     private readonly Mock<IEventosPublisher> _eventosPublisherMock = new();
+    private readonly Mock<IHistoricoSagaGateway> _historicoSagaGatewayMock = new();
 
     public OrdemServicoUseCasesTests()
     {
@@ -36,6 +38,7 @@ public sealed class OrdemServicoUseCasesTests
             _ordemServicoGatewayMock.Object,
             _indicadorUseCasesMock.Object,
             _eventosPublisherMock.Object,
+            _historicoSagaGatewayMock.Object,
             logger ?? NullLogger<OrdemServicoUseCases>.Instance);
     }
 
@@ -85,6 +88,19 @@ public sealed class OrdemServicoUseCasesTests
             StatusDescricao = ordemServico.Status.ObterDescricao(),
             HistoricoStatus = ordemServico.HistoricoStatus.Select(historico => new HistoricoStatusOrdemServicoViewModel { Status = historico.Status, DataAlteracao = historico.DataAlteracao }).ToArray()
         };
+
+    private void ConfigurarMapeamentoDoHistoricoSaga() =>
+        _mapperMock.Setup(m => m.Map<IReadOnlyCollection<EventoHistoricoSagaViewModel>>(It.IsAny<object>()))
+            .Returns((object source) => ((IEnumerable<EventoHistoricoSaga>)source).Select(evento => new EventoHistoricoSagaViewModel
+            {
+                OcorridoEm = evento.OcorridoEm,
+                Tipo = evento.Tipo,
+                Origem = evento.Origem,
+                Resultado = evento.Resultado.ToString(),
+                StatusAnterior = evento.StatusAnterior,
+                StatusNovo = evento.StatusNovo,
+                Motivo = evento.Motivo
+            }).ToArray());
 
     [Fact]
     public async Task CriarAsync_DeveGravarPublicarOrdemServicoAbertaERetornarViewModel()
@@ -350,6 +366,59 @@ public sealed class OrdemServicoUseCasesTests
         var resultado = await useCases.ListarPorClienteAsync(new ListarOrdensServicoPorClienteQuery { ClienteId = clienteId });
 
         Assert.Empty(resultado);
+    }
+
+    [Fact]
+    public async Task ListarHistoricoSagaAsync_DeveRetornarOsEventosEmOrdemCronologicaSemConsultarAOrdem()
+    {
+        var useCases = CriarUseCases();
+        var ordemServicoId = Guid.NewGuid();
+        var inicio = new DateTime(2026, 11, 27, 8, 00, 00, DateTimeKind.Utc);
+        var diagnostico = new EventoHistoricoSaga
+        {
+            OrdemServicoId = ordemServicoId,
+            OcorridoEm = inicio,
+            Tipo = nameof(DiagnosticoIniciado),
+            Origem = OrigensHistoricoSaga.Execution,
+            Resultado = ResultadoProcessamentoEvento.Processado,
+            StatusAnterior = 1,
+            StatusNovo = 2
+        };
+        var repetido = diagnostico with
+        {
+            OcorridoEm = inicio.AddMinutes(5),
+            Resultado = ResultadoProcessamentoEvento.Ignorado,
+            StatusAnterior = 2,
+            Motivo = "Somente ordem de servico recebida pode ser alterada para em diagnostico."
+        };
+        using var cancelamento = new CancellationTokenSource();
+        _historicoSagaGatewayMock.Setup(h => h.ListarAsync(ordemServicoId, cancelamento.Token)).ReturnsAsync([repetido, diagnostico]);
+        ConfigurarMapeamentoDoHistoricoSaga();
+
+        var historico = await useCases.ListarHistoricoSagaAsync(new ListarHistoricoSagaQuery { Id = ordemServicoId }, cancelamento.Token);
+
+        Assert.Equal(["Processado", "Ignorado"], historico.Select(evento => evento.Resultado));
+        Assert.Equal([inicio, inicio.AddMinutes(5)], historico.Select(evento => evento.OcorridoEm));
+        Assert.Equal("execution", historico.First().Origem);
+        Assert.Equal(1, historico.First().StatusAnterior);
+        Assert.Equal(2, historico.First().StatusNovo);
+        Assert.Equal(repetido.Motivo, historico.Last().Motivo);
+        // O historico e so do DynamoDB: OS excluida ou desconhecida nao impede a consulta
+        Assert.Empty(_ordemServicoGatewayMock.Invocations);
+    }
+
+    [Fact]
+    public async Task ListarHistoricoSagaAsync_DeveRetornarListaVazia_QuandoNaoHaHistorico()
+    {
+        var useCases = CriarUseCases();
+        var ordemServicoId = Guid.NewGuid();
+        _historicoSagaGatewayMock.Setup(h => h.ListarAsync(ordemServicoId, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        ConfigurarMapeamentoDoHistoricoSaga();
+
+        var historico = await useCases.ListarHistoricoSagaAsync(new ListarHistoricoSagaQuery { Id = ordemServicoId });
+
+        Assert.Empty(historico);
+        Assert.Empty(_ordemServicoGatewayMock.Invocations);
     }
 
     [Fact]

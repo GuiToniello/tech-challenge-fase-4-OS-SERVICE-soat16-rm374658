@@ -14,6 +14,8 @@ namespace TechChallenge.Oficina.OsService.Controllers.Features.OrdensServico
 
         object Adapt(OrdensServicoResult<IReadOnlyCollection<AcompanhamentoOrdemServicoViewModel>, Exception> result);
 
+        object Adapt(OrdensServicoResult<IReadOnlyCollection<EventoHistoricoSagaViewModel>, Exception> result);
+
         object Adapt(OrdensServicoResult<bool, Exception> result);
 
         object Empty();

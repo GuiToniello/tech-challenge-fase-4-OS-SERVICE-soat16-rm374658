@@ -3,6 +3,7 @@
     <Project Path="1 - Frameworks &amp; Drivers/TechChallenge.Oficina.OsService.API/TechChallenge.Oficina.OsService.API.csproj" />
     <Project Path="1 - Frameworks &amp; Drivers/TechChallenge.Oficina.OsService.DB/TechChallenge.Oficina.OsService.DB.csproj" />
     <Project Path="1 - Frameworks &amp; Drivers/TechChallenge.Oficina.OsService.Messaging/TechChallenge.Oficina.OsService.Messaging.csproj" />
+    <Project Path="1 - Frameworks &amp; Drivers/TechChallenge.Oficina.OsService.NoSql/TechChallenge.Oficina.OsService.NoSql.csproj" />
   </Folder>
   <Folder Name="/2 - Interface Adapters/">
     <Project Path="2 - Interface Adapters/TechChallenge.Oficina.OsService.Adapters/TechChallenge.Oficina.OsService.Adapters.csproj" />
@@ -16,6 +17,7 @@
   </Folder>
   <Folder Name="/ADR/">
     <File Path="../docs/adr/ADR-019-OS-Service-Microsservico-com-Banco-Proprio.md" />
+    <File Path="../docs/adr/ADR-026-Historico-da-Saga-no-DynamoDB.md" />
   </Folder>
   <Folder Name="/E2E/">
     <File Path="../e2e/TechChallenge.Oficina.OsService.API.postman_collection.json" />
@@ -29,6 +31,7 @@
     <Project Path="Tests/TechChallenge.Oficina.OsService.Entities.Tests/TechChallenge.Oficina.OsService.Entities.Tests.csproj" />
     <Project Path="Tests/TechChallenge.Oficina.OsService.DB.Tests/TechChallenge.Oficina.OsService.DB.Tests.csproj" />
     <Project Path="Tests/TechChallenge.Oficina.OsService.Messaging.Tests/TechChallenge.Oficina.OsService.Messaging.Tests.csproj" />
+    <Project Path="Tests/TechChallenge.Oficina.OsService.NoSql.Tests/TechChallenge.Oficina.OsService.NoSql.Tests.csproj" />
     <Project Path="Tests/TechChallenge.Oficina.OsService.Integration.Tests/TechChallenge.Oficina.OsService.Integration.Tests.csproj" />
   </Folder>
 </Solution>

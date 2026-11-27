@@ -12,6 +12,8 @@ using TechChallenge.Oficina.OsService.Controllers.Features.OrdensServico;
 using TechChallenge.Oficina.OsService.DB.Data;
 using TechChallenge.Oficina.OsService.Messaging;
 using TechChallenge.Oficina.OsService.Messaging.Configuration;
+using TechChallenge.Oficina.OsService.NoSql;
+using TechChallenge.Oficina.OsService.NoSql.Configuration;
 using TechChallenge.Oficina.OsService.UseCases.Features.Eventos.UseCases;
 using TechChallenge.Oficina.OsService.UseCases.Features.Indicadores.UseCases;
 using TechChallenge.Oficina.OsService.UseCases.Features.OrdensServico.Mappings;
@@ -46,12 +48,19 @@ if (sqsSettings.FilasPublicacao.Length == 0 || sqsSettings.FilasPublicacao.Any(s
     throw new InvalidOperationException("SqsSettings:FilasPublicacao é obrigatório: informe ao menos uma fila, sem itens vazios.");
 }
 
+// Historico da saga no Amazon DynamoDB: complementar e best-effort (a fonte da verdade e o PostgreSQL); credenciais e regiao pela cadeia padrao do AWS SDK
+var dynamoDbSettings = builder.Configuration
+    .GetSection(DynamoDbSettings.SectionName)
+    .Get<DynamoDbSettings>()
+    ?? new DynamoDbSettings();
+
 builder.Services.AddAutoMapper(_ => { }, typeof(OrdemServicoProfile).Assembly);
 builder.Services.AddScoped<IIndicadorUseCases, IndicadorUseCases>();
 builder.Services.AddScoped<IOrdemServicoUseCases, OrdemServicoUseCases>();
 builder.Services.AddScoped<IOrdemServicoEventosUseCases, OrdemServicoEventosUseCases>();
 builder.Services.AddInfraData(databaseSettings.ConnectionString);
 builder.Services.AddInfraMessaging(sqsSettings);
+builder.Services.AddInfraNoSql(dynamoDbSettings);
 
 builder.Services.AddScoped<IOrdensServicoController, OrdensServicoController>();
 builder.Services.AddScoped<IOrdensServicoAdapter, OrdensServicoAdapter>();
@@ -71,6 +80,9 @@ catch (Exception ex)
     Environment.ExitCode = 1;
     return;
 }
+
+// Local (DynamoDB Local): cria a tabela do historico da saga; na AWS a tabela e do Terraform. Falha so gera aviso.
+await app.Services.GarantirTabelasLocaisAsync();
 
 app.UseLoggingConfiguration();
 app.UseMiddleware<GlobalExceptionHandlerMiddleware>();

@@ -39,12 +39,15 @@ public static class OrdemServicoLogEventos
     {
         public const string Postgres = "postgres";
         public const string Sqs = "sqs";
+        public const string DynamoDb = "dynamodb";
     }
 
     public static class Operacoes
     {
         public const string Publicacao = "publicacao";
         public const string Consumo = "consumo";
+        public const string RegistroHistorico = "registro_historico";
+        public const string ConsultaHistorico = "consulta_historico";
     }
 
     public static string StatusParaLog(StatusOrdemServico status)

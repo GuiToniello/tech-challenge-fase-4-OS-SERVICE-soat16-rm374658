@@ -18,7 +18,7 @@ using TechChallenge.Oficina.OsService.UseCases.Features.OrdensServico.UseCases;
 namespace TechChallenge.Oficina.OsService.Integration.Tests.Infrastructure;
 
 /// <summary>
-/// Fixture de integração: DI real com EF Core InMemory e mock apenas de IEventosPublisher (a fila SQS).
+/// Fixture de integração: DI real com EF Core InMemory, mock apenas de IEventosPublisher (a fila SQS) e o histórico da saga (DynamoDB) em memória.
 /// Cada instância possui banco de dados isolado (nome único por GUID) e cada controller é obtido de um escopo novo, como numa requisição.
 /// </summary>
 public sealed class IntegrationTestFixture : IDisposable
@@ -42,6 +42,7 @@ public sealed class IntegrationTestFixture : IDisposable
             .Setup(p => p.PublicarAsync(It.IsAny<It.IsAnyType>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         services.AddSingleton(EventosPublisherMock.Object);
+        services.AddSingleton<IHistoricoSagaGateway>(HistoricoSaga);
 
         services.AddAutoMapper(_ => { }, typeof(OrdemServicoProfile).Assembly);
         services.AddScoped<IIndicadorUseCases, IndicadorUseCases>();
@@ -57,6 +58,7 @@ public sealed class IntegrationTestFixture : IDisposable
     }
 
     public Mock<IEventosPublisher> EventosPublisherMock { get; } = new();
+    public HistoricoSagaEmMemoria HistoricoSaga { get; } = new();
 
     private T Obter<T>() where T : notnull
     {

@@ -38,4 +38,31 @@ public sealed class OrdemServicoLogEventosTests
         Assert.Equal((4002, "evento.consumido"), (OrdemServicoLogEventos.EventoConsumido.Id, OrdemServicoLogEventos.EventoConsumido.Name));
         Assert.Equal((4003, "evento.ignorado"), (OrdemServicoLogEventos.EventoIgnorado.Id, OrdemServicoLogEventos.EventoIgnorado.Name));
     }
+
+    [Fact]
+    public void Etapas_TiposIntegracoesEOperacoes_DevemManterValoresDoContrato()
+    {
+        Assert.Equal(
+            ["abertura", "atualizacao", "exclusao", "diagnostico", "orcamento_geracao", "orcamento_aprovacao", "orcamento_recusa", "finalizacao", "entrega", "cancelamento"],
+            new[]
+            {
+                OrdemServicoLogEventos.Etapas.Abertura, OrdemServicoLogEventos.Etapas.Atualizacao, OrdemServicoLogEventos.Etapas.Exclusao,
+                OrdemServicoLogEventos.Etapas.Diagnostico, OrdemServicoLogEventos.Etapas.OrcamentoGeracao, OrdemServicoLogEventos.Etapas.OrcamentoAprovacao,
+                OrdemServicoLogEventos.Etapas.OrcamentoRecusa, OrdemServicoLogEventos.Etapas.Finalizacao, OrdemServicoLogEventos.Etapas.Entrega,
+                OrdemServicoLogEventos.Etapas.Cancelamento
+            });
+        Assert.Equal(
+            ["regra_negocio", "nao_encontrado"],
+            new[] { OrdemServicoLogEventos.TiposFalha.RegraNegocio, OrdemServicoLogEventos.TiposFalha.NaoEncontrado });
+        Assert.Equal(
+            ["postgres", "sqs", "dynamodb"],
+            new[] { OrdemServicoLogEventos.Integracoes.Postgres, OrdemServicoLogEventos.Integracoes.Sqs, OrdemServicoLogEventos.Integracoes.DynamoDb });
+        Assert.Equal(
+            ["publicacao", "consumo", "registro_historico", "consulta_historico"],
+            new[]
+            {
+                OrdemServicoLogEventos.Operacoes.Publicacao, OrdemServicoLogEventos.Operacoes.Consumo,
+                OrdemServicoLogEventos.Operacoes.RegistroHistorico, OrdemServicoLogEventos.Operacoes.ConsultaHistorico
+            });
+    }
 }

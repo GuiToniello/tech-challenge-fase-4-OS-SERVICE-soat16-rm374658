@@ -172,6 +172,40 @@ public sealed class OrdensServicoControllerTests
     }
 
     [Fact]
+    public async Task GetHistoricoSaga_DeveRepassarIdERetornarAdaptado()
+    {
+        var controller = CriarController();
+        var id = Guid.NewGuid();
+        using var cancelamento = new CancellationTokenSource();
+        IReadOnlyCollection<EventoHistoricoSagaViewModel> historico = [new EventoHistoricoSagaViewModel { Tipo = "DiagnosticoIniciado", Resultado = "Processado" }];
+        _useCasesMock.Setup(useCases => useCases.ListarHistoricoSagaAsync(It.Is<ListarHistoricoSagaQuery>(q => q.Id == id), cancelamento.Token))
+            .ReturnsAsync(historico);
+        _adapterMock
+            .Setup(adapter => adapter.Adapt(It.Is<OrdensServicoResult<IReadOnlyCollection<EventoHistoricoSagaViewModel>, Exception>>(r => r.Value == historico)))
+            .Returns(_resultadoAdaptado);
+
+        var resultado = await controller.GetHistoricoSaga(id, cancelamento.Token);
+
+        Assert.Same(_resultadoAdaptado, resultado);
+    }
+
+    [Fact]
+    public async Task GetHistoricoSaga_DevePropagarFalhaDoDynamoDbSemRegistrarOsFalha()
+    {
+        // A falha ja sai como integracao.falha no gateway do historico; o tratamento global responde 500
+        var loggerMock = new Mock<ILogger<OrdensServicoController>>();
+        var controller = CriarController(loggerMock.Object);
+        _useCasesMock.Setup(useCases => useCases.ListarHistoricoSagaAsync(It.IsAny<ListarHistoricoSagaQuery>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("DynamoDB indisponivel"));
+
+        var action = async () => await controller.GetHistoricoSaga(Guid.NewGuid(), CancellationToken.None);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(action);
+        Assert.Empty(loggerMock.Invocations);
+        Assert.Empty(_adapterMock.Invocations);
+    }
+
+    [Fact]
     public async Task Put_DeveRepassarComandoInteiro()
     {
         var controller = CriarController();

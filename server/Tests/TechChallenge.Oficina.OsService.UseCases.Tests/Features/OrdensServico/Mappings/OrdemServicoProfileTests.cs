@@ -4,6 +4,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using TechChallenge.Oficina.OsService.Entities.Features.OrdensServico;
 using TechChallenge.Oficina.OsService.Entities.Features.OrdensServico.Enums;
+using TechChallenge.Oficina.OsService.UseCases.Features.Eventos;
+using TechChallenge.Oficina.OsService.UseCases.Features.Eventos.Interfaces;
 using TechChallenge.Oficina.OsService.UseCases.Features.OrdensServico.Mappings;
 using TechChallenge.Oficina.OsService.UseCases.Features.OrdensServico.ViewModels;
 using Xunit;
@@ -89,5 +91,45 @@ public sealed class OrdemServicoProfileTests
         Assert.Equal("Em diagnóstico", viewModel.StatusDescricao);
         Assert.Equal(dataCadastro, viewModel.DataAlteracao);
         Assert.Equal(ordemServico.ServicoIds, viewModel.ServicoIds);
+    }
+
+    [Fact]
+    public void Map_HistoricoSagaParaViewModel_DeveCopiarOsCamposComOResultadoEmTexto()
+    {
+        // Mesmo mapeamento de colecao usado na consulta do historico da saga
+        var ocorridoEm = new DateTime(2026, 11, 27, 10, 15, 30, 123, DateTimeKind.Utc);
+        var aplicado = new EventoHistoricoSaga
+        {
+            OrdemServicoId = Guid.NewGuid(),
+            OcorridoEm = ocorridoEm,
+            Tipo = "OrdemServicoRejeitada",
+            Origem = "management",
+            Resultado = ResultadoProcessamentoEvento.Processado,
+            StatusAnterior = 1,
+            StatusNovo = 8
+        };
+        var semOrdem = aplicado with
+        {
+            OcorridoEm = ocorridoEm.AddSeconds(1),
+            Resultado = ResultadoProcessamentoEvento.Ignorado,
+            StatusAnterior = null,
+            StatusNovo = null,
+            Motivo = "Ordem de servico nao encontrada."
+        };
+
+        var viewModels = _mapper.Map<IReadOnlyCollection<EventoHistoricoSagaViewModel>>(new[] { aplicado, semOrdem }).ToArray();
+
+        Assert.Equal(2, viewModels.Length);
+        Assert.Equal(ocorridoEm, viewModels[0].OcorridoEm);
+        Assert.Equal("OrdemServicoRejeitada", viewModels[0].Tipo);
+        Assert.Equal("management", viewModels[0].Origem);
+        Assert.Equal("Processado", viewModels[0].Resultado);
+        Assert.Equal(1, viewModels[0].StatusAnterior);
+        Assert.Equal(8, viewModels[0].StatusNovo);
+        Assert.Null(viewModels[0].Motivo);
+        Assert.Equal("Ignorado", viewModels[1].Resultado);
+        Assert.Null(viewModels[1].StatusAnterior);
+        Assert.Null(viewModels[1].StatusNovo);
+        Assert.Equal("Ordem de servico nao encontrada.", viewModels[1].Motivo);
     }
 }

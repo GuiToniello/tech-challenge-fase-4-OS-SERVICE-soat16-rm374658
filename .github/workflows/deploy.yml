@@ -77,7 +77,8 @@ jobs:
               - 'kubernetes/k8s/**'
               - '.github/workflows/_k8s-apply.yml'
 
-  # O RDS usa a VPC, as subnets e o SG dos nodes criados pelo repo MANAGEMENT
+  # O RDS usa a VPC, as subnets e o SG dos nodes criados pelo repo MANAGEMENT, e a política da tabela
+  # DynamoDB vai para o usuário IAM do OS Service, também criado por ele
   apply-db:
     needs: changes
     if: needs.changes.outputs.db == 'true'

@@ -16,4 +16,5 @@ data:
   SqsSettings__FilasPublicacao__0: "techchallenge-oficina-management.fifo"
   SqsSettings__FilasPublicacao__1: "techchallenge-oficina-billing.fifo"
   SqsSettings__FilasPublicacao__2: "techchallenge-oficina-execution.fifo"
+  DynamoDbSettings__TabelaHistoricoSaga: "techchallenge-oficina-os-saga-historico"
   AWS_REGION: "us-east-1"

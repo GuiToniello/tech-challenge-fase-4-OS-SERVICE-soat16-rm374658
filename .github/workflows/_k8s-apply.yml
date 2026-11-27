@@ -102,9 +102,11 @@ jobs:
         run: |
           "DatabaseSettings__ConnectionString=Host=$env:RDS_ENDPOINT;Port=5432;Database=$env:RDS_DATABASE;Username=$env:RDS_USERNAME;Password=$env:RDS_PASSWORD" | Set-Content kubernetes/k8s/.env
 
-      # Chave de acesso do usuário IAM do OS Service nas filas SQS: criada pelo SQS/infra do repo MANAGEMENT
-      # e guardada no SSM Parameter Store. Mascarada antes de ir para o .env, para nunca aparecer no log
-      - name: Adicionar a chave do SQS ao kubernetes/k8s/.env
+      # Chave de acesso do usuário IAM do OS Service: criada pelo SQS/infra do repo MANAGEMENT e guardada no
+      # SSM Parameter Store. A mesma chave serve às filas SQS (política da MANAGEMENT) e à tabela DynamoDB do
+      # histórico da saga (política do DB/infra deste repo). Mascarada antes de ir para o .env, para nunca
+      # aparecer no log
+      - name: Adicionar a chave do usuário IAM do OS Service (SQS e DynamoDB) ao kubernetes/k8s/.env
         if: inputs.command == 'apply'
         run: |
           for pair in AWS_ACCESS_KEY_ID=access-key-id AWS_SECRET_ACCESS_KEY=secret-access-key; do

@@ -22,6 +22,7 @@
     <ProjectReference Include="..\..\3 - Application Business Rules\TechChallenge.Oficina.OsService.UseCases\TechChallenge.Oficina.OsService.UseCases.csproj" />
     <ProjectReference Include="..\TechChallenge.Oficina.OsService.DB\TechChallenge.Oficina.OsService.DB.csproj" />
     <ProjectReference Include="..\TechChallenge.Oficina.OsService.Messaging\TechChallenge.Oficina.OsService.Messaging.csproj" />
+    <ProjectReference Include="..\TechChallenge.Oficina.OsService.NoSql\TechChallenge.Oficina.OsService.NoSql.csproj" />
     <ProjectReference Include="..\..\2 - Interface Adapters\TechChallenge.Oficina.OsService.Controllers\TechChallenge.Oficina.OsService.Controllers.csproj" />
     <ProjectReference Include="..\..\2 - Interface Adapters\TechChallenge.Oficina.OsService.Adapters\TechChallenge.Oficina.OsService.Adapters.csproj" />
   </ItemGroup>

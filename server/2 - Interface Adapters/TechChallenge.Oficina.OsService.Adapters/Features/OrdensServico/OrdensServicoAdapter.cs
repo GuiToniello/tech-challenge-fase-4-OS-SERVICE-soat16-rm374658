@@ -62,6 +62,16 @@ namespace TechChallenge.Oficina.OsService.Adapters.Features.OrdensServico
             return CriaErro(result.Error!);
         }
 
+        public object Adapt(OrdensServicoResult<IReadOnlyCollection<EventoHistoricoSagaViewModel>, Exception> result)
+        {
+            if (result.Value != null)
+            {
+                return TypedResults.Ok(result.Value);
+            }
+
+            return CriaErro(result.Error!);
+        }
+
         public object Adapt(OrdensServicoResult<bool, Exception> result)
         {
             if (result.Value)

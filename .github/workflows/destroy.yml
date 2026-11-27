@@ -1,15 +1,17 @@
 name: Destroy
-# Destrutivo: exige confirmação por input e aprovação no Environment "destroy". Os dados do RDS do OS Service são perdidos.
+# Destrutivo: exige confirmação por input e aprovação no Environment "destroy". Os dados do RDS do OS Service e o
+# histórico da saga na tabela DynamoDB são perdidos.
 # Rode antes do Destroy do repo MANAGEMENT: o RDS daqui usa as subnets privadas e o SG dos nodes criados por ele,
-# e o DB/infra encontra a VPC pelo cluster EKS.
+# o DB/infra encontra a VPC pelo cluster EKS, e a política da tabela DynamoDB está no usuário IAM do OS Service
+# criado por ele.
 # Ordem entre os repos: LAMBDA, este, BILLING e EXECUTION (em qualquer ordem) → MANAGEMENT.
-# Ordem: namespace os-service no EKS (se o cluster existir) → RDS (DB/infra).
+# Ordem: namespace os-service no EKS (se o cluster existir) → RDS, tabela DynamoDB e política IAM (DB/infra).
 
 on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: 'Digite "destroy" para confirmar a remoção do namespace os-service no EKS e do RDS do OS Service'
+        description: 'Digite "destroy" para confirmar a remoção do namespace os-service no EKS, do RDS e da tabela DynamoDB do OS Service'
         required: true
         type: string
 

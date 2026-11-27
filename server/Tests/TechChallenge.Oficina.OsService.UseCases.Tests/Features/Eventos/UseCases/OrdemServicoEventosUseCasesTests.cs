@@ -17,12 +17,14 @@ public sealed class OrdemServicoEventosUseCasesTests
 {
     private readonly Mock<IOrdemServicoGateway> _ordemServicoGatewayMock = new();
     private readonly Mock<IEventosPublisher> _eventosPublisherMock = new();
+    private readonly Mock<IHistoricoSagaGateway> _historicoSagaGatewayMock = new();
 
     private OrdemServicoEventosUseCases CriarUseCases(ILogger<OrdemServicoEventosUseCases>? logger = null)
     {
         return new OrdemServicoEventosUseCases(
             _ordemServicoGatewayMock.Object,
             _eventosPublisherMock.Object,
+            _historicoSagaGatewayMock.Object,
             logger ?? NullLogger<OrdemServicoEventosUseCases>.Instance);
     }
 
@@ -81,6 +83,177 @@ public sealed class OrdemServicoEventosUseCasesTests
     {
         _ordemServicoGatewayMock.Verify(g => g.AtualizarAsync(It.IsAny<OrdemServico>(), It.IsAny<CancellationToken>()), Times.Never);
         Assert.Empty(_eventosPublisherMock.Invocations);
+    }
+
+    // O unico registro enviado ao historico da saga; sempre com CancellationToken.None, nunca com o token do consumidor
+    private EventoHistoricoSaga ObterRegistroDoHistorico()
+    {
+        var invocacao = Assert.Single(_historicoSagaGatewayMock.Invocations);
+        Assert.Equal(nameof(IHistoricoSagaGateway.RegistrarAsync), invocacao.Method.Name);
+        Assert.Equal(CancellationToken.None, (CancellationToken)invocacao.Arguments[1]);
+        return (EventoHistoricoSaga)invocacao.Arguments[0];
+    }
+
+    // Ordem entre gravacao, publicacao e historico (mocks diferentes): cada chamada anota o seu passo
+    private List<string> RegistrarPassos()
+    {
+        var passos = new List<string>();
+        _ordemServicoGatewayMock
+            .Setup(g => g.AtualizarAsync(It.IsAny<OrdemServico>(), It.IsAny<CancellationToken>()))
+            .Callback(() => passos.Add("gravar"))
+            .Returns(Task.CompletedTask);
+        _eventosPublisherMock
+            .Setup(p => p.PublicarAsync(It.IsAny<OrdemServicoStatusAlterado>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Callback(() => passos.Add("publicar"))
+            .Returns(Task.CompletedTask);
+        _historicoSagaGatewayMock
+            .Setup(h => h.RegistrarAsync(It.IsAny<EventoHistoricoSaga>(), It.IsAny<CancellationToken>()))
+            .Callback(() => passos.Add("historico"))
+            .Returns(Task.CompletedTask);
+        return passos;
+    }
+
+    // Chama o metodo do tipo de evento, como o EventosController faz a partir do tipo do envelope
+    private static Task<ResultadoProcessamentoEvento> ProcessarPorTipoAsync(
+        OrdemServicoEventosUseCases useCases,
+        string tipo,
+        Guid ordemServicoId,
+        CancellationToken cancellationToken) => tipo switch
+        {
+            nameof(OrdemServicoRejeitada) => useCases.ProcessarRejeitadaAsync(new OrdemServicoRejeitada(ordemServicoId, "Cliente nao encontrado."), cancellationToken),
+            nameof(OrcamentoGerado) => useCases.ProcessarOrcamentoGeradoAsync(new OrcamentoGerado(ordemServicoId, 389.90m), cancellationToken),
+            nameof(PagamentoAprovado) => useCases.ProcessarPagamentoAprovadoAsync(CriarPagamentoAprovado(ordemServicoId), cancellationToken),
+            nameof(OrcamentoRecusado) => useCases.ProcessarOrcamentoRecusadoAsync(new OrcamentoRecusado(ordemServicoId), cancellationToken),
+            nameof(DiagnosticoIniciado) => useCases.ProcessarDiagnosticoIniciadoAsync(new DiagnosticoIniciado(ordemServicoId), cancellationToken),
+            nameof(ExecucaoFinalizada) => useCases.ProcessarExecucaoFinalizadaAsync(new ExecucaoFinalizada(ordemServicoId), cancellationToken),
+            _ => throw new ArgumentOutOfRangeException(nameof(tipo), tipo, "Tipo de evento fora do contrato.")
+        };
+
+    // Cada evento do contrato com a origem fixa (valor gravado no DynamoDB), o status em que a OS precisa estar e o status resultante
+    [Theory]
+    [InlineData("OrdemServicoRejeitada", "management", StatusOrdemServico.Recebida, StatusOrdemServico.Cancelada)]
+    [InlineData("OrcamentoGerado", "billing", StatusOrdemServico.EmDiagnostico, StatusOrdemServico.AguardandoAprovacao)]
+    [InlineData("PagamentoAprovado", "billing", StatusOrdemServico.AguardandoAprovacao, StatusOrdemServico.EmExecucao)]
+    [InlineData("OrcamentoRecusado", "billing", StatusOrdemServico.AguardandoAprovacao, StatusOrdemServico.Finalizada)]
+    [InlineData("DiagnosticoIniciado", "execution", StatusOrdemServico.Recebida, StatusOrdemServico.EmDiagnostico)]
+    [InlineData("ExecucaoFinalizada", "execution", StatusOrdemServico.EmExecucao, StatusOrdemServico.Finalizada)]
+    public async Task Processar_DeveRegistrarProcessadoNoHistoricoComTipoEOrigemDoContrato(string tipo, string origem, StatusOrdemServico statusAtual, StatusOrdemServico statusNovo)
+    {
+        var ordemServico = CriarOrdemNoStatus(statusAtual);
+        ConfigurarOrdemExistente(ordemServico);
+        using var cancelamento = new CancellationTokenSource();
+
+        var resultado = await ProcessarPorTipoAsync(CriarUseCases(), tipo, ordemServico.Id, cancelamento.Token);
+
+        Assert.Equal(ResultadoProcessamentoEvento.Processado, resultado);
+        var registro = ObterRegistroDoHistorico();
+        Assert.Equal(ordemServico.Id, registro.OrdemServicoId);
+        Assert.Equal(tipo, registro.Tipo);
+        Assert.Equal(origem, registro.Origem);
+        Assert.Equal(ResultadoProcessamentoEvento.Processado, registro.Resultado);
+        Assert.Equal((int)statusAtual, registro.StatusAnterior);
+        Assert.Equal((int)statusNovo, registro.StatusNovo);
+        Assert.Null(registro.Motivo);
+        // O instante do registro e a data da nova entrada no historico de status (PostgreSQL)
+        Assert.Equal(ordemServico.HistoricoStatus.Max(historico => historico.DataAlteracao), registro.OcorridoEm);
+    }
+
+    [Fact]
+    public async Task Processar_DeveGravarPublicarERegistrarNoHistoricoNessaOrdem()
+    {
+        var ordemServico = CriarOrdemNoStatus(StatusOrdemServico.AguardandoAprovacao);
+        ConfigurarOrdemExistente(ordemServico);
+        var passos = RegistrarPassos();
+
+        await CriarUseCases().ProcessarPagamentoAprovadoAsync(CriarPagamentoAprovado(ordemServico.Id));
+
+        Assert.Equal(["gravar", "publicar", "historico"], passos);
+    }
+
+    [Fact]
+    public async Task ProcessarOrcamentoGeradoAsync_QuandoOrcamentoRegerado_DeveRegistrarProcessadoComStatusIguaisSemPublicar()
+    {
+        var ordemServico = CriarOrdemNoStatus(StatusOrdemServico.AguardandoAprovacao);
+        ConfigurarOrdemExistente(ordemServico);
+        var passos = RegistrarPassos();
+        using var cancelamento = new CancellationTokenSource();
+
+        var resultado = await CriarUseCases().ProcessarOrcamentoGeradoAsync(new OrcamentoGerado(ordemServico.Id, 150m), cancelamento.Token);
+
+        // So o valor muda: grava e registra no historico, sem mudanca de status para publicar
+        Assert.Equal(ResultadoProcessamentoEvento.Processado, resultado);
+        Assert.Equal(["gravar", "historico"], passos);
+        var registro = ObterRegistroDoHistorico();
+        Assert.Equal(nameof(OrcamentoGerado), registro.Tipo);
+        Assert.Equal(ResultadoProcessamentoEvento.Processado, registro.Resultado);
+        Assert.Equal((int)StatusOrdemServico.AguardandoAprovacao, registro.StatusAnterior);
+        Assert.Equal((int)StatusOrdemServico.AguardandoAprovacao, registro.StatusNovo);
+        Assert.Null(registro.Motivo);
+    }
+
+    [Fact]
+    public async Task Processar_DeveRegistrarIgnoradoSemStatus_QuandoOrdemNaoExiste()
+    {
+        var ordemServicoId = Guid.NewGuid();
+        using var cancelamento = new CancellationTokenSource();
+        var antes = DateTime.UtcNow;
+
+        var resultado = await CriarUseCases().ProcessarDiagnosticoIniciadoAsync(new DiagnosticoIniciado(ordemServicoId), cancelamento.Token);
+
+        Assert.Equal(ResultadoProcessamentoEvento.Ignorado, resultado);
+        VerificarIgnoradoSemGravarNemPublicar();
+        var registro = ObterRegistroDoHistorico();
+        Assert.Equal(ordemServicoId, registro.OrdemServicoId);
+        Assert.Equal(nameof(DiagnosticoIniciado), registro.Tipo);
+        Assert.Equal(OrigensHistoricoSaga.Execution, registro.Origem);
+        Assert.Equal(ResultadoProcessamentoEvento.Ignorado, registro.Resultado);
+        Assert.Null(registro.StatusAnterior);
+        Assert.Null(registro.StatusNovo);
+        Assert.Equal("Ordem de servico nao encontrada.", registro.Motivo);
+        Assert.InRange(registro.OcorridoEm, antes, DateTime.UtcNow);
+        Assert.Equal(DateTimeKind.Utc, registro.OcorridoEm.Kind);
+    }
+
+    [Fact]
+    public async Task Processar_DeveRegistrarIgnoradoComOStatusAtualEOMotivo_QuandoTransicaoNaoPermitida()
+    {
+        // Reentrega do PagamentoAprovado: a OS ja esta em execucao e a transicao e recusada antes de qualquer alteracao
+        var ordemServico = CriarOrdemNoStatus(StatusOrdemServico.EmExecucao);
+        ConfigurarOrdemExistente(ordemServico);
+        using var cancelamento = new CancellationTokenSource();
+        var antes = DateTime.UtcNow;
+
+        var resultado = await CriarUseCases().ProcessarPagamentoAprovadoAsync(CriarPagamentoAprovado(ordemServico.Id), cancelamento.Token);
+
+        Assert.Equal(ResultadoProcessamentoEvento.Ignorado, resultado);
+        VerificarIgnoradoSemGravarNemPublicar();
+        var registro = ObterRegistroDoHistorico();
+        Assert.Equal(ordemServico.Id, registro.OrdemServicoId);
+        Assert.Equal(nameof(PagamentoAprovado), registro.Tipo);
+        Assert.Equal(OrigensHistoricoSaga.Billing, registro.Origem);
+        Assert.Equal(ResultadoProcessamentoEvento.Ignorado, registro.Resultado);
+        Assert.Equal((int)StatusOrdemServico.EmExecucao, registro.StatusAnterior);
+        Assert.Equal((int)StatusOrdemServico.EmExecucao, registro.StatusNovo);
+        Assert.Equal("Somente ordem de servico aguardando aprovacao pode ter o pagamento aprovado.", registro.Motivo);
+        Assert.InRange(registro.OcorridoEm, antes, DateTime.UtcNow);
+    }
+
+    [Fact]
+    public async Task Processar_NaoDeveRegistrarNoHistorico_QuandoGravacaoFalha()
+    {
+        var ordemServico = CriarOrdemNoStatus(StatusOrdemServico.Recebida);
+        ConfigurarOrdemExistente(ordemServico);
+        var falha = new InvalidOperationException("PostgreSQL indisponivel");
+        _ordemServicoGatewayMock
+            .Setup(g => g.AtualizarAsync(It.IsAny<OrdemServico>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(falha);
+
+        var action = async () => await CriarUseCases().ProcessarDiagnosticoIniciadoAsync(new DiagnosticoIniciado(ordemServico.Id));
+
+        // A mensagem volta para a fila: o historico so recebe o veredito quando o processamento termina
+        Assert.Same(falha, await Assert.ThrowsAsync<InvalidOperationException>(action));
+        Assert.Empty(_eventosPublisherMock.Invocations);
+        Assert.Empty(_historicoSagaGatewayMock.Invocations);
     }
 
     [Theory]
@@ -470,5 +643,7 @@ public sealed class OrdemServicoEventosUseCasesTests
 
         await Assert.ThrowsAsync<InvalidOperationException>(action);
         _ordemServicoGatewayMock.Verify(g => g.AtualizarAsync(ordemServico, It.IsAny<CancellationToken>()), Times.Once);
+        // A mensagem volta para a fila e nada vai para o historico nesta tentativa
+        Assert.Empty(_historicoSagaGatewayMock.Invocations);
     }
 }
