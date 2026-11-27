@@ -1168,7 +1168,7 @@
     },
     {
       "name": "Saga",
-      "description": "Saga coreografada OS Service, Management, Billing e Execucao e Producao via SQS: a Management valida a OS, a Execucao e Producao inicia o diagnostico, o Billing gera e aprova o orcamento e confirma o pagamento (a OS so entra em execucao com o evento PagamentoAprovado), e a Execucao e Producao conduz a fila de execucao e finaliza a OS (evento ExecucaoFinalizada), com a linha do tempo da producao conferida no passo 13; a entrega e feita no OS Service. O historico da saga do OS Service (DynamoDB), com cada evento consumido e o resultado (Processado ou Ignorado), e conferido nos passos 18 (OS da saga) e 19 (OS cancelada pela Management). No modo simulado do Billing (sem AccessToken do Mercado Pago) a verificacao aprova o pagamento; com o Mercado Pago real, pague pelo link do passo 06 antes do passo 07. Os passos com espera aguardam o consumo do evento pela outra API (tempo_espera_ms). Requer as quatro APIs usando o mesmo broker.",
+      "description": "Saga coreografada OS Service, Management, Billing e Execucao e Producao via SQS: a Management valida a OS, a Execucao e Producao inicia o diagnostico, o Billing gera e aprova o orcamento e confirma o pagamento (a OS so entra em execucao com o evento PagamentoAprovado), e a Execucao e Producao conduz a fila de execucao e finaliza a OS (evento ExecucaoFinalizada), com a linha do tempo da producao conferida no passo 13; a entrega e feita no OS Service. O historico da saga do OS Service (DynamoDB), com cada evento consumido e o resultado (Processado ou Ignorado), e conferido nos passos 18 (OS da saga) e 19 (OS cancelada pela Management). O debito do estoque na Management com o pagamento aprovado, no historico de movimentacoes de estoque (DynamoDB), e conferido no passo 20. No modo simulado do Billing (sem AccessToken do Mercado Pago) a verificacao aprova o pagamento; com o Mercado Pago real, pague pelo link do passo 06 antes do passo 07. Os passos com espera aguardam o consumo do evento pela outra API (tempo_espera_ms). Requer as quatro APIs usando o mesmo broker.",
       "item": [
         {
           "name": "01 - Abrir OS para Orcamento (201)",
@@ -1912,6 +1912,46 @@
                 "ordens-servico",
                 "{{os_rejeitada_id}}",
                 "historico-saga"
+              ]
+            }
+          }
+        },
+        {
+          "name": "20 - Movimentacoes de Estoque na Management (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Historico de movimentacoes de estoque da Management (DynamoDB): o PagamentoAprovado do passo 07 debitou 1 unidade do insumo base (servico base) para a OS da saga",
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                  "var movimentacoes = pm.response.json();",
+                  "pm.test('Retorna array', function () { pm.expect(movimentacoes).to.be.an('array'); });",
+                  "var debito = movimentacoes.find(function (movimentacao) { return movimentacao.tipo === 'DebitoOrdemServico' && movimentacao.ordemServicoId === pm.collectionVariables.get('os_saga_id'); });",
+                  "pm.test('DebitoOrdemServico da OS da saga no historico', function () { pm.expect(debito, 'DebitoOrdemServico da OS da saga').to.be.an('object'); });",
+                  "pm.test('Origem evento, 1 unidade debitada do saldo', function () {",
+                  "  pm.expect(debito && debito.origem).to.eql('evento');",
+                  "  pm.expect(debito && debito.quantidade).to.eql(-1);",
+                  "  pm.expect(debito && debito.saldoNovo).to.eql(debito && debito.saldoAnterior - 1);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{managementBaseUrl}}/api/insumos/{{insumo_id}}/movimentacoes",
+              "host": [
+                "{{managementBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "insumos",
+                "{{insumo_id}}",
+                "movimentacoes"
               ]
             }
           }
